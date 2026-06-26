@@ -1,0 +1,3 @@
+function show(id){["buy","sell","portfolio"].forEach(x=>document.getElementById(x).style.display="none");document.getElementById(id).style.display="block";if(id==="portfolio"){document.getElementById("out").textContent=localStorage.getItem("invest")||"기록 없음";}}
+function saveBuy(){let a=JSON.parse(localStorage.getItem("invest")||"[]");a.push({type:"매수",name:bname.value,price:bprice.value,qty:bqty.value,reason:breason.value,date:new Date().toLocaleString()});localStorage.setItem("invest",JSON.stringify(a,null,2));alert("저장완료");}
+function saveSell(){let a=JSON.parse(localStorage.getItem("invest")||"[]");a.push({type:"매도",name:sname.value,reason:sreason.value,date:new Date().toLocaleString()});localStorage.setItem("invest",JSON.stringify(a,null,2));alert("저장완료");}
