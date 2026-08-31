@@ -1700,6 +1700,15 @@
   <div class="asset-body" id="sellPrincipleBody"></div>
 </div>
 
+<div class="asset-screen" id="riskIndexScreen">
+  <div class="asset-header">
+    <button class="asset-back" id="riskIndexBackBtn" type="button">‹ 뒤로</button>
+    <span class="asset-title">🚨 지수 관리</span>
+    <span style="width:44px;"></span>
+  </div>
+  <div class="asset-body" id="riskIndexBody"></div>
+</div>
+
 <div class="asset-screen" id="moodManageScreen">
   <div class="asset-header">
     <button class="asset-back" id="moodManageBackBtn" type="button">‹ 뒤로</button>
@@ -2844,6 +2853,101 @@ window.addEventListener('error', function(ev){
     });
   }
 
+  var RISK_INDEX_KEY = 'investment:riskthresholds';
+  var RISK_INDEX_LOCAL_KEY = 'investment_journal_riskthresholds_v1';
+  var riskThresholds = { wti:0, us10y:0, us30y:0 };
+
+  async function loadRiskThresholds(){
+    if(hasClaudeStorage()){
+      try{
+        var res = await window.storage.get(RISK_INDEX_KEY, false);
+        if(res && res.value) return Object.assign({wti:0,us10y:0,us30y:0}, JSON.parse(res.value));
+        return { wti:0, us10y:0, us30y:0 };
+      }catch(e){ return { wti:0, us10y:0, us30y:0 }; }
+    }
+    try{
+      var raw = localStorage.getItem(RISK_INDEX_LOCAL_KEY);
+      return raw ? Object.assign({wti:0,us10y:0,us30y:0}, JSON.parse(raw)) : { wti:0, us10y:0, us30y:0 };
+    }catch(e){ return { wti:0, us10y:0, us30y:0 }; }
+  }
+  async function saveRiskThresholds(){
+    if(hasClaudeStorage()){
+      try{ await window.storage.set(RISK_INDEX_KEY, JSON.stringify(riskThresholds), false); }catch(e){}
+      return;
+    }
+    try{ localStorage.setItem(RISK_INDEX_LOCAL_KEY, JSON.stringify(riskThresholds)); }catch(e){}
+  }
+
+  function renderRiskIndexScreen(){
+    var body = document.getElementById('riskIndexBody');
+    var html = '';
+    html += '<p class="card-title no-divider">🚨 위험지수 설정</p>';
+    html += '<div class="field"><span class="field-label field-label-strong">🛢️ 국제유가(WTI) 위험지수($)</span><input type="number" id="ri_wti" value="'+(riskThresholds.wti||'')+'"></div>';
+    html += '<div class="field"><span class="field-label field-label-strong">📜 미국채 10년물 위험지수(%)</span><input type="number" step="0.01" id="ri_us10y" value="'+(riskThresholds.us10y||'')+'"></div>';
+    html += '<div class="field"><span class="field-label field-label-strong">📜 미국채 30년물 위험지수(%)</span><input type="number" step="0.01" id="ri_us30y" value="'+(riskThresholds.us30y||'')+'"></div>';
+    html += '<button class="savebtn" id="ri_saveBtn" type="button" style="width:100%;">저장</button>';
+    html += '<p class="toast" id="ri_toast"></p>';
+
+    html += '<p class="card-title">📊 현재 시세</p>';
+    html += '<button class="cancelbtn" id="ri_fetchBtn" type="button" style="width:100%;margin-bottom:12px;">🔄 최신 시세 조회</button>';
+    html += '<div id="ri_quotes"></div>';
+
+    body.innerHTML = html;
+
+    document.getElementById('ri_saveBtn').addEventListener('click', async function(){
+      riskThresholds.wti = parseFloat(document.getElementById('ri_wti').value) || 0;
+      riskThresholds.us10y = parseFloat(document.getElementById('ri_us10y').value) || 0;
+      riskThresholds.us30y = parseFloat(document.getElementById('ri_us30y').value) || 0;
+      await saveRiskThresholds();
+      var t = document.getElementById('ri_toast');
+      t.style.color = 'var(--pine)';
+      t.textContent = '저장됐어요';
+      setTimeout(function(){ t.textContent = ''; }, 1500);
+      fetchAndRenderRiskQuotes();
+    });
+    document.getElementById('ri_fetchBtn').addEventListener('click', fetchAndRenderRiskQuotes);
+    fetchAndRenderRiskQuotes();
+  }
+
+  async function fetchAndRenderRiskQuotes(){
+    var container = document.getElementById('ri_quotes');
+    if(!container) return;
+    container.innerHTML = '<p class="savehint">조회 중…</p>';
+    var indices = [
+      { key:'wti', label:'국제유가(WTI)', unit:'$', threshold:riskThresholds.wti },
+      { key:'us10y', label:'미국채 10년물', unit:'%', threshold:riskThresholds.us10y },
+      { key:'us30y', label:'미국채 30년물', unit:'%', threshold:riskThresholds.us30y }
+    ];
+    var html = '';
+    for(var i=0; i<indices.length; i++){
+      var idx = indices[i];
+      try{
+        var res = await fetch('/api/naver-price?index=' + idx.key);
+        var rawText = await res.text();
+        var data;
+        try{ data = JSON.parse(rawText); }catch(e){ throw new Error('서버 응답 오류'); }
+        if(!res.ok || data.error){ throw new Error(data.error || '조회 실패'); }
+        var price = data.price;
+        var prev = data.previousClose;
+        var changePct = (prev != null && prev !== 0) ? ((price - prev) / prev * 100) : null;
+        var isRisk = idx.threshold > 0 && price > idx.threshold;
+        html += '<div class="holding-item">';
+        html += '<div class="holding-top"><span class="holding-name">'+(isRisk?'🚨 ':'')+idx.label+'</span><span class="holding-amt">'+price.toFixed(2)+idx.unit+'</span></div>';
+        if(prev != null){
+          var chColor = changePct >= 0 ? 'var(--brick)' : 'var(--blue)';
+          html += '<div class="holding-sub">전일가 '+prev.toFixed(2)+idx.unit+' · <span style="color:'+chColor+';font-weight:600;">등락률 '+(changePct>=0?'+':'')+changePct.toFixed(2)+'%</span></div>';
+        }
+        if(idx.threshold > 0){
+          html += '<div class="holding-sub" style="color:var(--ink-faint);">설정 위험지수: '+idx.threshold+idx.unit+'</div>';
+        }
+        html += '</div>';
+      }catch(err){
+        html += '<div class="holding-item"><div class="holding-top"><span class="holding-name">'+idx.label+'</span></div><p class="toast" style="color:var(--brick);">조회 실패: '+(err && err.message ? err.message : err)+'</p></div>';
+      }
+    }
+    container.innerHTML = html;
+  }
+
   function renderSellPrincipleScreen(){
     var body = document.getElementById('sellPrincipleBody');
     var html = '';
@@ -3388,6 +3492,11 @@ window.addEventListener('error', function(ev){
     html += '<span class="ios-sub">손절 '+sellSettings.stopLossPct+'% · 익절 '+sellSettings.takeProfitPct+'%</span>';
     html += '<span class="ios-chevron">›</span>';
     html += '</button>';
+    html += '<button class="ios-row" id="riskIndexRowBtn" type="button">';
+    html += '<span class="ios-icon" style="background:var(--olive);">🚨</span>';
+    html += '<span class="ios-label">지수 관리</span>';
+    html += '<span class="ios-chevron">›</span>';
+    html += '</button>';
     html += '</div>';
 
     html += '<p class="asset-disclaimer">종목 현재가는 네이버증권 등과 실시간 연동되지 않아요(브라우저 보안 정책상 불가능). 직접 입력한 값으로만 손익을 계산해요.</p>';
@@ -3456,6 +3565,10 @@ window.addEventListener('error', function(ev){
     document.getElementById('sellSettingsBtn').addEventListener('click', function(){
       renderSellPrincipleScreen();
       document.getElementById('sellPrincipleScreen').classList.add('open');
+    });
+    document.getElementById('riskIndexRowBtn').addEventListener('click', function(){
+      renderRiskIndexScreen();
+      document.getElementById('riskIndexScreen').classList.add('open');
     });
     document.getElementById('profitRankingRowBtn').addEventListener('click', function(){
       renderProfitRankingScreen();
@@ -4880,6 +4993,10 @@ window.addEventListener('error', function(ev){
       document.getElementById('sellPrincipleScreen').classList.remove('open');
       renderAssetScreen();
     });
+    document.getElementById('riskIndexBackBtn').addEventListener('click', function(){
+      document.getElementById('riskIndexScreen').classList.remove('open');
+      renderAssetScreen();
+    });
     document.getElementById('moodManageRowBtn').addEventListener('click', function(){
       renderMoodManageScreen();
       document.getElementById('moodManageScreen').classList.add('open');
@@ -4934,6 +5051,7 @@ window.addEventListener('error', function(ev){
       accounts = await loadAccounts();
       sellSettings = await loadSellSettings();
       indexData = await loadIndexData();
+      riskThresholds = await loadRiskThresholds();
       checklistItems = await loadChecklistItems();
       customMoods = await loadCustomMoods();
       renderCustomMoodChips();
