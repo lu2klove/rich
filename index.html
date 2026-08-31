@@ -341,6 +341,16 @@
     margin-top:8px;
   }
   .sltp-line{ font-size:12.5px; }
+  .holding-toggle-btn{
+    background:none;
+    border:none;
+    color:var(--blue);
+    font-size:12.5px;
+    font-weight:600;
+    padding:6px 0;
+    cursor:pointer;
+    margin-top:2px;
+  }
   .ios-list{
     border:1px solid var(--line);
     border-radius:10px;
@@ -2676,9 +2686,33 @@ window.addEventListener('error', function(ev){
     return { best: best, worst: worst };
   }
 
+  function computeAccountRanking(holdings){
+    var withProfit = holdings.filter(function(h){ return h.profitPct != null; });
+    var accountMap = {};
+    withProfit.forEach(function(h){
+      var acc = getTickerAccount(h.ticker) || '계좌 미지정';
+      if(!accountMap[acc]) accountMap[acc] = { account:acc, invested:0, profit:0, marketValue:0 };
+      accountMap[acc].invested += h.totalCost;
+      accountMap[acc].profit += h.profit;
+      accountMap[acc].marketValue += h.marketValue;
+    });
+    var list = Object.keys(accountMap).map(function(k){
+      var a = accountMap[k];
+      a.profitPct = a.invested > 0 ? (a.profit / a.invested * 100) : 0;
+      return a;
+    });
+    var byBest = list.slice().sort(function(a,b){ return b.profitPct - a.profitPct; });
+    var best = (byBest.length > 0 && byBest[0].profitPct > 0) ? byBest[0] : null;
+    var worst = list.slice().sort(function(a,b){ return a.profitPct - b.profitPct; })
+      .filter(function(a){ return a.profitPct < 0; })
+      .slice(0, 3);
+    return { best: best, worst: worst };
+  }
+
   function renderProfitRankingScreen(){
     var holdings = computeHoldings();
     var ranking = computeProfitRanking(holdings);
+    var acctRanking = computeAccountRanking(holdings);
     var html = '';
 
     html += '<p class="card-title no-divider" style="margin-top:0;">🏆 효자종목</p>';
@@ -2700,6 +2734,30 @@ window.addEventListener('error', function(ev){
       ranking.worst.forEach(function(w, i){
         html += '<div class="holding-item">';
         html += '<div class="holding-top"><span class="holding-name">'+(i+1)+'. '+escapeHtml(w.ticker)+'</span><span class="holding-amt" style="color:var(--blue);">'+formatWon(w.profit)+'원</span></div>';
+        html += '<div class="holding-sub" style="color:var(--blue);font-weight:600;">수익률 '+w.profitPct.toFixed(1)+'%</div>';
+        html += '</div>';
+      });
+    }
+
+    html += '<p class="card-title" style="margin-top:20px;">🏦 효자계좌</p>';
+    if(!acctRanking.best){
+      html += '<p class="empty-inline">효자 계좌는 하루 아침에 나오지 않는다.</p>';
+    }else{
+      var ab = acctRanking.best;
+      var abColor = ab.profitPct >= 0 ? 'var(--brick)' : 'var(--blue)';
+      html += '<div class="holding-item">';
+      html += '<div class="holding-top"><span class="holding-name">'+escapeHtml(ab.account)+'</span><span class="holding-amt" style="color:'+abColor+';">'+(ab.profit>=0?'+':'')+formatWon(ab.profit)+'원</span></div>';
+      html += '<div class="holding-sub" style="color:'+abColor+';font-weight:600;">수익률 '+(ab.profitPct>=0?'+':'')+ab.profitPct.toFixed(1)+'%</div>';
+      html += '</div>';
+    }
+
+    html += '<p class="card-title" style="margin-top:20px;">📉 불효자계좌 TOP 3</p>';
+    if(acctRanking.worst.length === 0){
+      html += '<p class="empty-inline">손실 중인 계좌가 없어요.</p>';
+    }else{
+      acctRanking.worst.forEach(function(w, i){
+        html += '<div class="holding-item">';
+        html += '<div class="holding-top"><span class="holding-name">'+(i+1)+'. '+escapeHtml(w.account)+'</span><span class="holding-amt" style="color:var(--blue);">'+formatWon(w.profit)+'원</span></div>';
         html += '<div class="holding-sub" style="color:var(--blue);font-weight:600;">수익률 '+w.profitPct.toFixed(1)+'%</div>';
         html += '</div>';
       });
@@ -3186,7 +3244,8 @@ window.addEventListener('error', function(ev){
     html += '<p class="asset-hero-num">'+formatWon(grandTotal)+'원</p>';
     if(hasAnyPrice){
       var profitColor = totalProfit >= 0 ? 'var(--brick)' : 'var(--blue)';
-      html += '<p class="asset-hero-sub" style="color:'+profitColor+';font-weight:600;">평가손익 '+(totalProfit>=0?'+':'')+formatWon(totalProfit)+'원</p>';
+      var totalProfitPct = totalInvested > 0 ? (totalProfit / totalInvested * 100) : 0;
+      html += '<p class="asset-hero-sub" style="color:'+profitColor+';font-weight:600;">평가손익 '+(totalProfit>=0?'+':'')+formatWon(totalProfit)+'원 ('+(totalProfitPct>=0?'+':'')+totalProfitPct.toFixed(1)+'%)</p>';
     }
     if(holdingsFilterAccount){
       html += '<p class="asset-hero-sub">보유종목 '+heroHoldings.length+'개 · 매입원금 '+formatWon(totalInvested)+'원</p>';
@@ -3246,7 +3305,9 @@ window.addEventListener('error', function(ev){
         var stopLossAmt = h.marketValue * (1 - sellSettings.stopLossPct/100);
         var takeProfitAmt = h.marketValue * (1 + sellSettings.takeProfitPct/100);
         html += '<div class="holding-sub sltp-line">손절가 <b style="color:var(--blue);">'+formatWon(stopLossAmt)+'원</b> · 익절가 <b style="color:var(--brick);">'+formatWon(takeProfitAmt)+'원</b></div>';
-        html += '<div class="holding-row2">';
+        var holdingSafeId = escapeHtml(h.ticker).replace(/[^a-zA-Z0-9]/g,'_');
+        html += '<button class="holding-toggle-btn" data-toggle-id="'+holdingSafeId+'" type="button">펼쳐보기 ▾</button>';
+        html += '<div class="holding-row2" id="holdingDetails_'+holdingSafeId+'" style="display:none;">';
         html += '<div class="symbol-row">';
         html += '<input type="text" class="symbolInput2" data-ticker="'+escapeHtml(h.ticker)+'" placeholder="종목코드, 종목명(국내), 또는 AAPL 등" value="'+escapeHtml(getTickerSymbol(h.ticker))+'">';
         html += '<button class="fetchbtn" data-ticker="'+escapeHtml(h.ticker)+'" type="button">🔄 조회</button>';
@@ -3265,6 +3326,10 @@ window.addEventListener('error', function(ev){
           html += '<option value="'+escapeHtml(acc.name)+'"'+sel+'>'+escapeHtml(acc.name)+'</option>';
         });
         html += '</select>';
+        html += '<div class="row2" style="margin-top:10px;">';
+        html += '<button class="cancelbtn holding-rename-btn" data-ticker="'+escapeHtml(h.ticker)+'" type="button">✏️ 종목명 수정</button>';
+        html += '<button class="danger holding-delete-btn" data-ticker="'+escapeHtml(h.ticker)+'" type="button">🗑️ 종목 삭제</button>';
+        html += '</div>';
         html += '</div>';
         html += '</div>';
         });
@@ -3337,6 +3402,51 @@ window.addEventListener('error', function(ev){
         if(portfolioViewMode === 'account'){
           updatePortfolioSection();
         }
+      });
+    });
+    document.querySelectorAll('.holding-toggle-btn').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var id = btn.getAttribute('data-toggle-id');
+        var panel = document.getElementById('holdingDetails_'+id);
+        if(!panel) return;
+        var isOpen = panel.style.display !== 'none';
+        panel.style.display = isOpen ? 'none' : 'block';
+        btn.textContent = isOpen ? '펼쳐보기 ▾' : '접기 ▴';
+      });
+    });
+    document.querySelectorAll('.holding-rename-btn').forEach(function(btn){
+      btn.addEventListener('click', async function(){
+        var oldName = btn.getAttribute('data-ticker');
+        var newName = prompt('새 종목명을 입력해주세요', oldName);
+        if(!newName) return;
+        newName = newName.trim();
+        if(!newName || newName === oldName) return;
+        entries.forEach(function(e){ if(e.ticker === oldName) e.ticker = newName; });
+        var reg = tickerRegistry.find(function(t){ return t.ticker === oldName; });
+        if(reg) reg.ticker = newName;
+        if(currentPrices[oldName] != null){
+          currentPrices[newName] = currentPrices[oldName];
+          delete currentPrices[oldName];
+        }
+        await saveEntries();
+        await saveTickerRegistry();
+        await saveCurrentPrices();
+        renderAssetScreen();
+      });
+    });
+    document.querySelectorAll('.holding-delete-btn').forEach(function(btn){
+      btn.addEventListener('click', async function(){
+        var ticker = btn.getAttribute('data-ticker');
+        var count = entries.filter(function(e){ return e.ticker === ticker; }).length;
+        var ok = confirm(ticker+' 관련 기록 '+count+'건을 전부 삭제할까요? 이 작업은 되돌릴 수 없어요.');
+        if(!ok) return;
+        entries = entries.filter(function(e){ return e.ticker !== ticker; });
+        tickerRegistry = tickerRegistry.filter(function(t){ return t.ticker !== ticker; });
+        delete currentPrices[ticker];
+        await saveEntries();
+        await saveTickerRegistry();
+        await saveCurrentPrices();
+        renderAssetScreen();
       });
     });
     document.getElementById('accountRowBtn').addEventListener('click', function(){
