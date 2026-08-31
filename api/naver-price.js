@@ -135,7 +135,8 @@ export default async function handler(request) {
 // here (server-side), which avoids the browser CORS issue just as effectively.
 async function handleIndexRequest(indexKey) {
   const NAVER_DOMESTIC = { kospi: 'KOSPI', kosdaq: 'KOSDAQ' };
-  const YAHOO_WORLD = { nasdaq: '^IXIC', snp500: '^GSPC' };
+  const YAHOO_WORLD = { nasdaq: '^IXIC', snp500: '^GSPC', wti: 'CL=F', us10y: '^TNX', us30y: '^TYX' };
+  const YAHOO_SCALE_DOWN_10 = { us10y: true, us30y: true }; // Yahoo reports these at 10x actual %
 
   try {
     if (NAVER_DOMESTIC[indexKey]) {
@@ -190,7 +191,12 @@ async function handleIndexRequest(indexKey) {
       }
       const prevClose = meta.previousClose != null ? meta.previousClose
         : (meta.chartPreviousClose != null ? meta.chartPreviousClose : null);
-      return Response.json({ price: meta.regularMarketPrice, previousClose: prevClose, source: 'yahoo' });
+      const scale = YAHOO_SCALE_DOWN_10[indexKey] ? 0.1 : 1;
+      return Response.json({
+        price: meta.regularMarketPrice * scale,
+        previousClose: prevClose != null ? prevClose * scale : null,
+        source: 'yahoo'
+      });
     }
 
     return Response.json({ error: '알 수 없는 지수예요: ' + indexKey }, { status: 400 });
