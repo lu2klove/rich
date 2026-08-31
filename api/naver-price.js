@@ -135,8 +135,10 @@ export default async function handler(request) {
 // here (server-side), which avoids the browser CORS issue just as effectively.
 async function handleIndexRequest(indexKey) {
   const NAVER_DOMESTIC = { kospi: 'KOSPI', kosdaq: 'KOSDAQ' };
-  const YAHOO_WORLD = { nasdaq: '^IXIC', snp500: '^GSPC', wti: 'CL=F', us10y: '^TNX', us30y: '^TYX' };
-  const YAHOO_SCALE_DOWN_10 = { us10y: true, us30y: true }; // Yahoo reports these at 10x actual %
+  const YAHOO_WORLD = {
+    nasdaq: '^IXIC', snp500: '^GSPC', wti: 'CL=F', us10y: '^TNX', us30y: '^TYX',
+    fx: 'KRW=X', sox: '^SOX', dow: '^DJI', btc: 'BTC-USD'
+  };
 
   try {
     if (NAVER_DOMESTIC[indexKey]) {
@@ -191,10 +193,9 @@ async function handleIndexRequest(indexKey) {
       }
       const prevClose = meta.previousClose != null ? meta.previousClose
         : (meta.chartPreviousClose != null ? meta.chartPreviousClose : null);
-      const scale = YAHOO_SCALE_DOWN_10[indexKey] ? 0.1 : 1;
       return Response.json({
-        price: meta.regularMarketPrice * scale,
-        previousClose: prevClose != null ? prevClose * scale : null,
+        price: meta.regularMarketPrice,
+        previousClose: prevClose,
         source: 'yahoo'
       });
     }
