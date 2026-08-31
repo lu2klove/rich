@@ -41,6 +41,12 @@ async function resolveNameToCode(name) {
 export default async (req) => {
   try {
     const url = new URL(req.url);
+    const indexParam = url.searchParams.get('index'); // kospi | kosdaq | nasdaq | snp500
+
+    if (indexParam) {
+      return await handleIndexRequest(indexParam);
+    }
+
     const codesParam = url.searchParams.get('codes') || url.searchParams.get('code');
     const nameParam = url.searchParams.get('name');
 
@@ -120,6 +126,75 @@ export default async (req) => {
     return Response.json({ error: err.message || '알 수 없는 오류' }, { status: 500 });
   }
 };
+
+// 코스피/코스닥: Naver's dedicated domestic index endpoint (same shape as stocks).
+// 나스닥/S&P500: no confirmed Naver endpoint, so proxied through Yahoo Finance
+// here (server-side), which avoids the browser CORS issue just as effectively.
+async function handleIndexRequest(indexKey) {
+  const NAVER_DOMESTIC = { kospi: 'KOSPI', kosdaq: 'KOSDAQ' };
+  const YAHOO_WORLD = { nasdaq: '^IXIC', snp500: '^GSPC' };
+
+  try {
+    if (NAVER_DOMESTIC[indexKey]) {
+      const apiUrl = 'https://polling.finance.naver.com/api/realtime/domestic/index/' + NAVER_DOMESTIC[indexKey];
+      const res = await fetch(apiUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          Referer: 'https://finance.naver.com/'
+        }
+      });
+      const rawText = await res.text();
+      if (!res.ok) {
+        return Response.json({ error: `네이버 지수 API 오류: HTTP ${res.status}`, raw: rawText.slice(0, 300) }, { status: 502 });
+      }
+      let data;
+      try { data = JSON.parse(rawText); } catch (e) {
+        return Response.json({ error: '응답이 JSON 형식이 아니에요', raw: rawText.slice(0, 300) }, { status: 500 });
+      }
+      const list = data && Array.isArray(data.datas) ? data.datas : null;
+      const item = list && list[0];
+      if (!item) {
+        return Response.json({ error: '지수 데이터를 찾지 못했어요', raw: JSON.stringify(data).slice(0, 500) }, { status: 500 });
+      }
+      const priceRaw = item.closePrice;
+      const price = priceRaw != null ? parseFloat(String(priceRaw).replace(/,/g, '')) : null;
+      if (price == null || isNaN(price)) {
+        return Response.json({ error: '지수 데이터를 찾지 못했어요', raw: JSON.stringify(item).slice(0, 500) }, { status: 500 });
+      }
+      var changeRaw = item.compareToPreviousClosePrice;
+      var change = changeRaw != null ? parseFloat(String(changeRaw).replace(/,/g, '')) : null;
+      var prevClose = (change != null && !isNaN(change)) ? (price - change) : null;
+      return Response.json({ price: price, previousClose: prevClose, source: 'naver' });
+    }
+
+    if (YAHOO_WORLD[indexKey]) {
+      const apiUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/' + encodeURIComponent(YAHOO_WORLD[indexKey]);
+      const res = await fetch(apiUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      });
+      const rawText = await res.text();
+      if (!res.ok) {
+        return Response.json({ error: `야후 API 오류: HTTP ${res.status}`, raw: rawText.slice(0, 300) }, { status: 502 });
+      }
+      let data;
+      try { data = JSON.parse(rawText); } catch (e) {
+        return Response.json({ error: '응답이 JSON 형식이 아니에요', raw: rawText.slice(0, 300) }, { status: 500 });
+      }
+      const result = data && data.chart && data.chart.result && data.chart.result[0];
+      const meta = result && result.meta;
+      if (!meta || meta.regularMarketPrice == null) {
+        return Response.json({ error: '지수 데이터를 찾지 못했어요', raw: JSON.stringify(data).slice(0, 500) }, { status: 500 });
+      }
+      const prevClose = meta.previousClose != null ? meta.previousClose
+        : (meta.chartPreviousClose != null ? meta.chartPreviousClose : null);
+      return Response.json({ price: meta.regularMarketPrice, previousClose: prevClose, source: 'yahoo' });
+    }
+
+    return Response.json({ error: '알 수 없는 지수예요: ' + indexKey }, { status: 400 });
+  } catch (err) {
+    return Response.json({ error: err.message || '알 수 없는 오류' }, { status: 500 });
+  }
+}
 
 // No custom `config.path` — exposed at Netlify's standard default endpoint:
 // /.netlify/functions/naver-price
