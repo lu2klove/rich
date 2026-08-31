@@ -2287,7 +2287,7 @@ window.addEventListener('error', function(ev){
     var cleanInput = codeOrName.replace(/\.KS$|\.KQ$/i, '').trim();
     var isCode = /^\d{6}$/.test(cleanInput);
     var qs = isCode ? ('codes=' + encodeURIComponent(cleanInput)) : ('name=' + encodeURIComponent(cleanInput));
-    var res = await fetch('/.netlify/functions/naver-price?' + qs);
+    var res = await fetch('/api/naver-price?' + qs);
     var rawText = await res.text();
     var data;
     try{
@@ -3041,7 +3041,7 @@ window.addEventListener('error', function(ev){
       });
     }
     async function fetchIndexQuoteViaServer(indexKey){
-      var res = await fetch('/.netlify/functions/naver-price?index=' + encodeURIComponent(indexKey));
+      var res = await fetch('/api/naver-price?index=' + encodeURIComponent(indexKey));
       var rawText = await res.text();
       var data;
       try{
