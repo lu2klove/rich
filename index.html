@@ -3040,6 +3040,20 @@ window.addEventListener('error', function(ev){
         renderSellChecklistScreen();
       });
     }
+    async function fetchIndexQuoteViaServer(indexKey){
+      var res = await fetch('/.netlify/functions/naver-price?index=' + encodeURIComponent(indexKey));
+      var rawText = await res.text();
+      var data;
+      try{
+        data = JSON.parse(rawText);
+      }catch(e){
+        throw new Error('서버 응답 오류 (HTTP '+res.status+')');
+      }
+      if(!res.ok || data.error){
+        throw new Error(data.error || ('서버 오류 (HTTP '+res.status+')'));
+      }
+      return data;
+    }
     async function autoFetchIndexQuote(){
       var statusEl = document.getElementById('indexFetchStatus');
       var curInp = document.getElementById('indexCurrentInput');
@@ -3048,7 +3062,7 @@ window.addEventListener('error', function(ev){
       statusEl.style.color = 'var(--ink-soft)';
       statusEl.textContent = '조회 중…';
       try{
-        var quote = await fetchYahooQuote(INDEX_META[selectedIndexKey].symbol);
+        var quote = await fetchIndexQuoteViaServer(selectedIndexKey);
         curInp.value = quote.price;
         if(quote.previousClose != null){
           highInp.value = quote.previousClose;
