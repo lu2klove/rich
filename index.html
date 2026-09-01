@@ -636,6 +636,14 @@
     padding:9px 10px;
     font-size:13px;
   }
+  @keyframes highlightPulse{
+    0%{ background:var(--brick-soft); }
+    100%{ background:transparent; }
+  }
+  .highlight-pulse{
+    animation:highlightPulse 2s ease-out;
+    border-radius:12px;
+  }
   .index-inputs{ margin-top:10px; }
   .index-inputs input{
     width:100%;
@@ -2976,13 +2984,7 @@ window.addEventListener('error', function(ev){
     html += '<div class="field"><span class="field-label field-label-strong">💱 환율(USD/KRW) 위험지수(원)</span><input type="number" id="ri_fx" value="'+(riskThresholds.fx||'')+'"></div>';
     html += '<button class="savebtn" id="ri_saveBtn" type="button" style="width:100%;">저장</button>';
     html += '<p class="toast" id="ri_toast"></p>';
-
-    html += '<p class="card-title">📊 현재 시세</p>';
-    html += '<button class="cancelbtn" id="ri_fetchBtn" type="button" style="width:100%;margin-bottom:12px;">🔄 최신 시세 조회</button>';
-    html += '<div id="ri_quotes"></div>';
-
-    html += '<p class="card-title">🌐 주요 지수 시세</p>';
-    html += '<div id="ri_extraQuotes"></div>';
+    html += '<p class="savehint">여기서 설정한 위험지수는 매도 체크리스트의 "시장 현황"에서 실제 시세와 비교돼요.</p>';
 
     body.innerHTML = html;
 
@@ -2996,93 +2998,29 @@ window.addEventListener('error', function(ev){
       t.style.color = 'var(--pine)';
       t.textContent = '저장됐어요';
       setTimeout(function(){ t.textContent = ''; }, 1500);
-      fetchAndRenderRiskQuotes();
     });
-    document.getElementById('ri_fetchBtn').addEventListener('click', function(){
-      fetchAndRenderRiskQuotes();
-      fetchAndRenderExtraQuotes();
-    });
-    fetchAndRenderRiskQuotes();
-    fetchAndRenderExtraQuotes();
   }
 
-  async function fetchAndRenderRiskQuotes(){
-    var container = document.getElementById('ri_quotes');
-    if(!container) return;
-    container.innerHTML = '<p class="savehint">조회 중…</p>';
-    var indices = [
-      { key:'wti', label:'국제유가(WTI)', unit:'$', threshold:riskThresholds.wti },
-      { key:'us10y', label:'미국채 10년물', unit:'%', threshold:riskThresholds.us10y },
-      { key:'us30y', label:'미국채 30년물', unit:'%', threshold:riskThresholds.us30y },
-      { key:'fx', label:'환율(USD/KRW)', unit:'원', threshold:riskThresholds.fx }
-    ];
-    var html = '';
-    for(var i=0; i<indices.length; i++){
-      var idx = indices[i];
+  var MAJOR_QUOTE_META = [
+    { key:'wti', label:'국제유가(WTI)', unit:'$', thresholdKey:'wti' },
+    { key:'us10y', label:'미국채 10년물', unit:'%', thresholdKey:'us10y' },
+    { key:'us30y', label:'미국채 30년물', unit:'%', thresholdKey:'us30y' },
+    { key:'fx', label:'환율(USD/KRW)', unit:'원', thresholdKey:'fx' },
+    { key:'sox', label:'필라델피아반도체지수', unit:'', thresholdKey:null },
+    { key:'btc', label:'비트코인', unit:'$', thresholdKey:null }
+  ];
+  var majorQuoteCache = {};
+  async function fetchMajorQuoteData(){
+    for(var i=0; i<MAJOR_QUOTE_META.length; i++){
+      var idx = MAJOR_QUOTE_META[i];
       try{
         var res = await fetch('/api/naver-price?index=' + idx.key);
-        var rawText = await res.text();
-        var data;
-        try{ data = JSON.parse(rawText); }catch(e){ throw new Error('서버 응답 오류'); }
-        if(!res.ok || data.error){ throw new Error(data.error || '조회 실패'); }
-        var price = data.price;
-        var prev = data.previousClose;
-        var changePct = (prev != null && prev !== 0) ? ((price - prev) / prev * 100) : null;
-        var isRisk = idx.threshold > 0 && price > idx.threshold;
-        html += '<div class="holding-item">';
-        html += '<div class="holding-top"><span class="holding-name">'+(isRisk?'🚨 ':'')+idx.label+'</span><span class="holding-amt">'+price.toFixed(2)+idx.unit+'</span></div>';
-        if(prev != null){
-          var chColor = changePct >= 0 ? 'var(--brick)' : 'var(--blue)';
-          html += '<div class="holding-sub">전일가 '+prev.toFixed(2)+idx.unit+' · <span style="color:'+chColor+';font-weight:600;">등락률 '+(changePct>=0?'+':'')+changePct.toFixed(2)+'%</span></div>';
+        var data = await res.json();
+        if(res.ok && !data.error){
+          majorQuoteCache[idx.key] = data;
         }
-        if(idx.threshold > 0){
-          html += '<div class="holding-sub" style="color:var(--ink-faint);">설정 위험지수: '+idx.threshold+idx.unit+'</div>';
-        }
-        html += '</div>';
-      }catch(err){
-        html += '<div class="holding-item"><div class="holding-top"><span class="holding-name">'+idx.label+'</span></div><p class="toast" style="color:var(--brick);">조회 실패: '+(err && err.message ? err.message : err)+'</p></div>';
-      }
+      }catch(e){}
     }
-    container.innerHTML = html;
-  }
-
-  async function fetchAndRenderExtraQuotes(){
-    var container = document.getElementById('ri_extraQuotes');
-    if(!container) return;
-    container.innerHTML = '<p class="savehint">조회 중…</p>';
-    var indices = [
-      { key:'sox', label:'필라델피아반도체지수', unit:'' },
-      { key:'dow', label:'다우존스', unit:'' },
-      { key:'snp500', label:'S&P500', unit:'' },
-      { key:'nasdaq', label:'나스닥', unit:'' },
-      { key:'kospi', label:'코스피', unit:'' },
-      { key:'kosdaq', label:'코스닥', unit:'' },
-      { key:'btc', label:'비트코인', unit:'$' }
-    ];
-    var html = '';
-    for(var i=0; i<indices.length; i++){
-      var idx = indices[i];
-      try{
-        var res = await fetch('/api/naver-price?index=' + idx.key);
-        var rawText = await res.text();
-        var data;
-        try{ data = JSON.parse(rawText); }catch(e){ throw new Error('서버 응답 오류'); }
-        if(!res.ok || data.error){ throw new Error(data.error || '조회 실패'); }
-        var price = data.price;
-        var prev = data.previousClose;
-        var changePct = (prev != null && prev !== 0) ? ((price - prev) / prev * 100) : null;
-        html += '<div class="holding-item">';
-        html += '<div class="holding-top"><span class="holding-name">'+idx.label+'</span><span class="holding-amt">'+idx.unit+price.toLocaleString(undefined,{maximumFractionDigits:2})+'</span></div>';
-        if(prev != null && changePct != null){
-          var chColor = changePct >= 0 ? 'var(--brick)' : 'var(--blue)';
-          html += '<div class="holding-sub">전일가 '+idx.unit+prev.toLocaleString(undefined,{maximumFractionDigits:2})+' · <span style="color:'+chColor+';font-weight:600;">등락률 '+(changePct>=0?'+':'')+changePct.toFixed(2)+'%</span></div>';
-        }
-        html += '</div>';
-      }catch(err){
-        html += '<div class="holding-item"><div class="holding-top"><span class="holding-name">'+idx.label+'</span></div><p class="toast" style="color:var(--brick);">조회 실패: '+(err && err.message ? err.message : err)+'</p></div>';
-      }
-    }
-    container.innerHTML = html;
   }
 
   function renderSellPrincipleScreen(){
@@ -3231,6 +3169,31 @@ window.addEventListener('error', function(ev){
 
     // ---- 1. 시장 현황 ----
     html += '<p class="card-title" style="margin-top:20px;">📈 시장 현황</p>';
+    html += '<p class="field-label field-label-strong">🌐 주요 지수 시세</p>';
+    html += '<table class="status-table"><thead><tr><th>지수명</th><th>현재가</th><th>대비율</th><th>위험관리</th></tr></thead><tbody>';
+    MAJOR_QUOTE_META.forEach(function(idx){
+      var d = majorQuoteCache[idx.key];
+      var price = d ? d.price : null;
+      var prev = d ? d.previousClose : null;
+      var changePct = (price != null && prev != null && prev !== 0) ? ((price - prev) / prev * 100) : null;
+      var threshold = idx.thresholdKey ? riskThresholds[idx.thresholdKey] : 0;
+      var tier;
+      if(!idx.thresholdKey || !threshold){
+        tier = null;
+      }else{
+        tier = (price != null && price > threshold) ? {emoji:'🚨',label:'위험',color:'var(--brick)'} : {emoji:'🟢',label:'정상',color:'var(--pine)'};
+      }
+      html += '<tr>';
+      html += '<td>'+idx.label+'</td>';
+      html += '<td>'+(price!=null ? idx.unit+price.toLocaleString(undefined,{maximumFractionDigits:2}) : '-')+'</td>';
+      html += '<td>'+(changePct!=null ? '<span style="color:'+(changePct>=0?'var(--brick)':'var(--blue)')+';font-weight:600;">'+(changePct>=0?'+':'-')+Math.abs(changePct).toFixed(1)+'%</span>' : '-')+'</td>';
+      html += '<td style="white-space:nowrap;">'+(tier ? '<span style="color:'+tier.color+';font-weight:700;">'+tier.emoji+' '+tier.label+'</span>' : '<span style="color:var(--ink-faint);">-</span>')+'</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+    html += '<p class="savehint" style="margin-bottom:16px;">위험지수는 자산관리 → 지수 관리에서 설정할 수 있어요.</p>';
+
+    html += '<p class="field-label field-label-strong">📊 국내·해외 주요지수</p>';
     html += '<div class="radio-row" style="display:flex;gap:18px;margin-bottom:12px;">';
     html += '<label style="display:flex;align-items:center;gap:6px;font-size:13.5px;"><input type="radio" name="marketStatusRadio" value="high52"'+(marketStatusMode==='high52'?' checked':'')+'> 최근고점(52주)</label>';
     html += '<label style="display:flex;align-items:center;gap:6px;font-size:13.5px;"><input type="radio" name="marketStatusRadio" value="prevclose"'+(marketStatusMode==='prevclose'?' checked':'')+'> 전일종가</label>';
@@ -3243,19 +3206,26 @@ window.addEventListener('error', function(ev){
       var pctDrop = (current != null && compareVal != null && compareVal > 0) ? ((compareVal - current) / compareVal * 100) : null;
       var changeSignPct = pctDrop != null ? -pctDrop : null;
       var tier = pctDrop != null ? computeRiskTier(pctDrop, sellSettings.stopLossPct) : {emoji:'⚪',label:'-',color:'var(--ink-faint)'};
-      html += '<tr>';
-      html += '<td>'+idx.label+'</td>';
+      var isClickable = tier.label === '위험' || tier.label === '경계';
+      html += '<tr'+(isClickable ? ' class="market-row-clickable" data-indexkey="'+idx.key+'" style="cursor:pointer;"' : '')+'>';
+      html += '<td>'+idx.label+(isClickable?' 👆':'')+'</td>';
       html += '<td>'+(current!=null ? current.toLocaleString(undefined,{maximumFractionDigits:2}) : '-')+'</td>';
       html += '<td>'+(changeSignPct!=null ? '<span style="color:'+(changeSignPct>=0?'var(--brick)':'var(--blue)')+';font-weight:600;">'+(changeSignPct>=0?'+':'-')+Math.abs(changeSignPct).toFixed(1)+'%</span>' : '-')+'</td>';
       html += '<td style="color:'+tier.color+';font-weight:700;white-space:nowrap;">'+tier.emoji+' '+tier.label+'</td>';
       html += '</tr>';
     });
     html += '</tbody></table>';
-    html += '<button class="cancelbtn" id="marketStatusFetchBtn" type="button" style="width:100%;margin-top:10px;">🔄 시장 현황 새로고침</button>';
+    html += '<button class="cancelbtn" id="marketStatusFetchBtn" type="button" style="width:100%;margin-top:10px;">🔄 시장·종목 시세 새로고침</button>';
+    if(marketStatusHoldingsRefreshMsg){
+      html += '<p class="toast" style="color:var(--pine);margin-top:6px;">'+escapeHtml(marketStatusHoldingsRefreshMsg)+'</p>';
+    }
+    if(marketStatusLastError){
+      html += '<p class="toast" style="color:var(--brick);margin-top:6px;">일부 조회 실패: '+escapeHtml(marketStatusLastError)+'</p>';
+    }
     html += '<p class="savehint">위험관리는 매도 원칙에 설정한 손절 기준('+sellSettings.stopLossPct+'%)을 기준으로 계산돼요.</p>';
 
     // ---- 2. 종목 현황 ----
-    html += '<p class="card-title" style="margin-top:24px;">📊 종목 현황</p>';
+    html += '<div id="stockStatusSection"><p class="card-title" style="margin-top:24px;">📊 종목 현황</p>';
     html += '<div class="row2" style="margin-bottom:12px;">';
     html += '<select id="stockStatusAccountSelect" class="select-pill" style="flex:1;"><option value="">전체 계좌</option>';
     accounts.forEach(function(acc){
@@ -3297,7 +3267,8 @@ window.addEventListener('error', function(ev){
     }
 
     // ---- 3. 투자논리 점검 (기존 체크리스트 유지) ----
-    html += '<p class="card-title" style="margin-top:24px;">🔄 투자논리 점검</p>';
+    html += '</div>';
+    html += '<div id="investLogicSection"><p class="card-title" style="margin-top:24px;">🔄 투자논리 점검</p>';
     html += '<div class="checklist-list">';
     checklistItems.forEach(function(item){
       var checked = !!step3Checks[item.id];
@@ -3318,6 +3289,7 @@ window.addEventListener('error', function(ev){
     html += '<p class="verdict-pct">'+pctText+'</p>';
     html += '<p class="verdict-label" style="color:'+(verdict?'var(--brick)':'var(--pine)')+';">'+(verdict?'🚨 매도 권장':'🌿 매도 불필요')+'</p>';
     html += '</div>';
+    html += '</div>';
 
     body.innerHTML = html;
 
@@ -3328,8 +3300,40 @@ window.addEventListener('error', function(ev){
       });
     });
     document.getElementById('marketStatusFetchBtn').addEventListener('click', async function(){
+      var btn = this;
+      btn.disabled = true;
+      btn.textContent = '조회 중…';
+      await fetchMajorQuoteData();
       await fetchMarketStatusData();
+      var priceResult = await performHoldingsPriceRefresh();
+      marketStatusHoldingsRefreshMsg = priceResult.total > 0
+        ? ('보유종목 '+priceResult.successCount+'개 갱신'+(priceResult.failCount>0?' · '+priceResult.failCount+'개 실패':''))
+        : '';
       renderSellChecklistScreen();
+    });
+    document.querySelectorAll('.market-row-clickable').forEach(function(row){
+      row.addEventListener('click', function(){
+        var indexKey = row.getAttribute('data-indexkey').replace(/^mkt_/, '');
+        stockStatusIndexFilter = indexKey;
+        renderSellChecklistScreen();
+        setTimeout(function(){
+          var filteredHoldings = computeHoldings().filter(function(h){ return h.profitPct != null; });
+          if(stockStatusAccount){
+            filteredHoldings = filteredHoldings.filter(function(h){ return getTickerAccount(h.ticker) === stockStatusAccount; });
+          }
+          filteredHoldings = filteredHoldings.filter(function(h){ return getTickerIndex(h.ticker) === indexKey; });
+          var anyRisky = filteredHoldings.some(function(h){
+            var t = computeRiskTier(-h.profitPct, sellSettings.stopLossPct);
+            return t.label === '위험' || t.label === '경계';
+          });
+          var target = anyRisky ? document.getElementById('investLogicSection') : document.getElementById('stockStatusSection');
+          if(target) target.scrollIntoView({ behavior:'smooth', block:'start' });
+          if(anyRisky && target){
+            target.classList.add('highlight-pulse');
+            setTimeout(function(){ target.classList.remove('highlight-pulse'); }, 2000);
+          }
+        }, 50);
+      });
     });
     document.getElementById('stockStatusAccountSelect').addEventListener('change', function(){
       stockStatusAccount = this.value;
@@ -3349,21 +3353,37 @@ window.addEventListener('error', function(ev){
 
     if(!marketStatusFetchAttempted){
       marketStatusFetchAttempted = true;
-      fetchMarketStatusData().then(function(){ renderSellChecklistScreen(); });
+      Promise.all([fetchMajorQuoteData(), fetchMarketStatusData()]).then(function(){ renderSellChecklistScreen(); });
     }
   }
 
   var marketStatusFetchAttempted = false;
+  var marketStatusLastError = '';
+  var marketStatusHoldingsRefreshMsg = '';
   async function fetchMarketStatusData(){
+    marketStatusLastError = '';
+    var errorMsgs = [];
     for(var i=0; i<MARKET_STATUS_INDICES.length; i++){
       var idx = MARKET_STATUS_INDICES[i];
       try{
         var res = await fetch('/api/naver-price?index=' + idx.key);
-        var data = await res.json();
+        var rawText = await res.text();
+        var data;
+        try{ data = JSON.parse(rawText); }catch(e){
+          errorMsgs.push(idx.label+': 서버 응답 오류(HTTP '+res.status+')');
+          continue;
+        }
         if(res.ok && !data.error){
           marketStatusCache[idx.key] = data;
+        }else{
+          errorMsgs.push(idx.label+': '+(data.error || ('HTTP '+res.status)));
         }
-      }catch(e){}
+      }catch(e){
+        errorMsgs.push(idx.label+': '+(e && e.message ? e.message : '네트워크 오류'));
+      }
+    }
+    if(errorMsgs.length > 0){
+      marketStatusLastError = errorMsgs.join(' · ');
     }
   }
 
@@ -3398,12 +3418,9 @@ window.addEventListener('error', function(ev){
   }
 
   var refreshAllStatusMessage = { text:'', color:'' };
-  async function refreshAllHoldingPrices(){
-    var statusEl = document.getElementById('refreshAllStatus');
+  async function performHoldingsPriceRefresh(onProgress){
     var holdings = computeHoldings();
-    if(holdings.length === 0 || !statusEl) return;
-    statusEl.style.color = 'var(--ink-soft)';
-    statusEl.textContent = '조회 중… (0/'+holdings.length+')';
+    if(holdings.length === 0) return { successCount:0, failCount:0, total:0 };
 
     var successCount = 0, failCount = 0;
     var domesticWithCode = [];
@@ -3439,7 +3456,7 @@ window.addEventListener('error', function(ev){
       }catch(e){
         failCount += domesticWithCode.length;
       }
-      statusEl.textContent = '조회 중… ('+(successCount+failCount)+'/'+holdings.length+')';
+      if(onProgress) onProgress(successCount, failCount, holdings.length);
     }
 
     for(var i=0; i<others.length; i++){
@@ -3459,12 +3476,23 @@ window.addEventListener('error', function(ev){
       }catch(e){
         failCount++;
       }
-      statusEl.textContent = '조회 중… ('+(successCount+failCount)+'/'+holdings.length+')';
+      if(onProgress) onProgress(successCount, failCount, holdings.length);
     }
 
     await saveCurrentPrices();
-    refreshAllStatusMessage.color = failCount > 0 ? 'var(--brick)' : 'var(--pine)';
-    refreshAllStatusMessage.text = successCount+'개 갱신 완료' + (failCount>0 ? ' · '+failCount+'개 실패(직접 입력 필요)' : '');
+    return { successCount:successCount, failCount:failCount, total:holdings.length };
+  }
+
+  async function refreshAllHoldingPrices(){
+    var statusEl = document.getElementById('refreshAllStatus');
+    if(!statusEl) return;
+    statusEl.style.color = 'var(--ink-soft)';
+    statusEl.textContent = '조회 중…';
+    var result = await performHoldingsPriceRefresh(function(s,f,total){
+      statusEl.textContent = '조회 중… ('+(s+f)+'/'+total+')';
+    });
+    refreshAllStatusMessage.color = result.failCount > 0 ? 'var(--brick)' : 'var(--pine)';
+    refreshAllStatusMessage.text = result.successCount+'개 갱신 완료' + (result.failCount>0 ? ' · '+result.failCount+'개 실패(직접 입력 필요)' : '');
     renderAssetScreen();
     setTimeout(function(){
       refreshAllStatusMessage.text = '';
