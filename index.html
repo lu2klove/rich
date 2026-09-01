@@ -4838,12 +4838,13 @@ window.addEventListener('error', function(ev){
     var herdCount = periodEntries.filter(function(e){ return e.mood === '🐑'; }).length;
     var emotionalCount = periodEntries.filter(function(e){ return EMOTIONAL_MOODS.indexOf(e.mood) !== -1; }).length;
 
-    var passCount = 0, failCount = 0;
+    var passCount = 0, failCount = 0, naCount = 0;
     periodEntries.forEach(function(e){
       if(!Array.isArray(e.principles)) return;
       e.principles.forEach(function(p){
         if(p.result === 'PASS') passCount++;
         else if(p.result === 'FAIL') failCount++;
+        else if(p.result === 'NA') naCount++;
       });
     });
     var principleApplied = passCount + failCount;
@@ -4857,6 +4858,11 @@ window.addEventListener('error', function(ev){
     html += '<div class="report-card-divider"></div>';
     if(complianceRate != null){
       html += '<div class="report-card-row"><span>투자원칙 준수율</span><b style="color:'+(complianceRate>=80?'var(--pine)':(complianceRate>=60?'var(--olive)':'var(--brick)'))+';font-size:15px;">'+complianceRate.toFixed(1)+'%</b></div>';
+      html += '<div style="display:flex;justify-content:space-around;text-align:center;background:var(--paper-raised);border-radius:8px;padding:10px 0;margin:8px 0 14px;">';
+      html += '<div><div style="font-size:11px;color:var(--ink-faint);">준수</div><b>'+passCount+'회</b></div>';
+      html += '<div><div style="font-size:11px;color:var(--ink-faint);">위반</div><b style="color:var(--brick);">'+failCount+'회</b></div>';
+      html += '<div><div style="font-size:11px;color:var(--ink-faint);">해당없음</div><b style="color:var(--ink-faint);">'+naCount+'회</b></div>';
+      html += '</div>';
     }
     html += '<div class="report-card-row"><span>매수</span><b>'+counts.buy+'회</b></div>';
     html += '<div class="report-card-row"><span>매도</span><b>'+counts.sell+'회</b></div>';
@@ -4886,6 +4892,120 @@ window.addEventListener('error', function(ev){
       html += '<div class="report-card-insight"><span>가장 아쉬운 행동</span><span>→ '+bw.worst+'</span></div>';
     }
     html += '</div>';
+
+    // ---- 원칙별 세부 통계 ----
+    var principleStats = {};
+    INVESTMENT_PRINCIPLES.forEach(function(p){ principleStats[p.id] = { pass:0, fail:0, na:0 }; });
+    periodEntries.forEach(function(e){
+      if(!Array.isArray(e.principles)) return;
+      e.principles.forEach(function(pr){
+        if(!principleStats[pr.id]) return;
+        if(pr.result === 'PASS') principleStats[pr.id].pass++;
+        else if(pr.result === 'FAIL') principleStats[pr.id].fail++;
+        else if(pr.result === 'NA') principleStats[pr.id].na++;
+      });
+    });
+    var principleRows = INVESTMENT_PRINCIPLES.map(function(p){
+      var s = principleStats[p.id];
+      var applied = s.pass + s.fail;
+      var rate = applied > 0 ? (s.pass / applied * 100) : null;
+      return { id:p.id, text:p.text, pass:s.pass, fail:s.fail, na:s.na, applied:applied, rate:rate };
+    }).filter(function(r){ return r.applied > 0; });
+
+    if(principleRows.length > 0){
+      var bestP = principleRows.slice().sort(function(a,b){ return b.rate - a.rate; })[0];
+      var worstP = principleRows.slice().sort(function(a,b){ return a.rate - b.rate; })[0];
+      var mostFail = principleRows.filter(function(r){ return r.fail > 0; }).sort(function(a,b){ return b.fail - a.fail; })[0];
+
+      html += '<div class="report-card" style="margin-top:14px;">';
+      html += '<div class="row2">';
+      html += '<div style="text-align:center;padding:10px;background:var(--pine-soft);border-radius:8px;">';
+      html += '<div style="font-size:12px;">🏆 BEST 원칙</div>';
+      html += '<div style="font-size:12.5px;font-weight:700;margin:4px 0;">'+escapeHtml(bestP.text)+'</div>';
+      html += '<div style="font-size:16px;font-weight:800;color:var(--pine);">'+bestP.rate.toFixed(1)+'%</div>';
+      html += '</div>';
+      html += '<div style="text-align:center;padding:10px;background:var(--brick-soft);border-radius:8px;">';
+      html += '<div style="font-size:12px;">⚠️ WORST 원칙</div>';
+      html += '<div style="font-size:12.5px;font-weight:700;margin:4px 0;">'+escapeHtml(worstP.text)+'</div>';
+      html += '<div style="font-size:16px;font-weight:800;color:var(--brick);">'+worstP.rate.toFixed(1)+'%</div>';
+      html += '</div>';
+      html += '</div>';
+      if(mostFail){
+        html += '<div style="text-align:center;padding:10px;background:var(--olive-soft);border-radius:8px;margin-top:10px;">';
+        html += '<div style="font-size:12px;">🔥 반복되는 실수</div>';
+        html += '<div style="font-size:12.5px;font-weight:700;margin:4px 0;">'+escapeHtml(mostFail.text)+'</div>';
+        html += '<div style="font-size:14px;font-weight:800;color:var(--olive);">'+mostFail.fail+'회 위반</div>';
+        html += '</div>';
+      }
+      html += '</div>';
+
+      html += '<p class="card-title" style="margin-top:18px;">📋 원칙별 준수율</p>';
+      html += '<table class="status-table"><thead><tr><th>원칙</th><th>적용</th><th>준수</th><th>위반</th><th>준수율</th></tr></thead><tbody>';
+      principleRows.forEach(function(r){
+        var rColor = r.rate >= 80 ? 'var(--pine)' : (r.rate >= 60 ? 'var(--olive)' : 'var(--brick)');
+        html += '<tr>';
+        html += '<td>'+escapeHtml(r.text)+'</td>';
+        html += '<td>'+r.applied+'</td>';
+        html += '<td>'+r.pass+'</td>';
+        html += '<td>'+r.fail+'</td>';
+        html += '<td style="color:'+rColor+';font-weight:700;">'+r.rate.toFixed(1)+'%</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+    }
+
+    // ---- 월별 준수율 추이 (올해 전체 기록 기준, 필터와 무관) ----
+    var thisYear = new Date().getFullYear();
+    var monthlyStats = [];
+    for(var m=0; m<12; m++){
+      var monthStart = thisYear+'-'+String(m+1).padStart(2,'0')+'-01';
+      var monthEnd = thisYear+'-'+String(m+1).padStart(2,'0')+'-'+String(new Date(thisYear,m+1,0).getDate()).padStart(2,'0');
+      var monthEntries = entries.filter(function(e){ return e.date >= monthStart && e.date <= monthEnd; });
+      var mp = 0, mf = 0;
+      monthEntries.forEach(function(e){
+        if(!Array.isArray(e.principles)) return;
+        e.principles.forEach(function(pr){
+          if(pr.result === 'PASS') mp++;
+          else if(pr.result === 'FAIL') mf++;
+        });
+      });
+      var mApplied = mp + mf;
+      if(mApplied > 0){
+        monthlyStats.push({ month:m+1, rate: mp/mApplied*100 });
+      }
+    }
+    if(monthlyStats.length > 0){
+      html += '<p class="card-title" style="margin-top:18px;">📈 월별 준수율 ('+thisYear+'년)</p>';
+      monthlyStats.forEach(function(ms){
+        var barColor = ms.rate >= 80 ? 'var(--pine)' : (ms.rate >= 60 ? 'var(--olive)' : 'var(--brick)');
+        html += '<div class="stat-bar-row">';
+        html += '<div class="stat-bar-label"><span>'+ms.month+'월</span><span style="font-weight:700;">'+ms.rate.toFixed(0)+'%</span></div>';
+        html += '<div class="stat-bar-track"><div class="stat-bar-fill" style="width:'+ms.rate.toFixed(0)+'%;background:'+barColor+';"></div></div>';
+        html += '</div>';
+      });
+    }
+
+    // ---- 나의 투자 패턴 (간단 휴리스틱 인사이트) ----
+    var volatileEntries = periodEntries.filter(function(e){ return e.market === 'volatile' || e.market === 'down'; });
+    var volatileEmotional = volatileEntries.filter(function(e){ return EMOTIONAL_MOODS.indexOf(e.mood) !== -1; }).length;
+    var calmEntries = periodEntries.filter(function(e){ return e.market === 'up' || e.market === 'sideways'; });
+    var calmEmotional = calmEntries.filter(function(e){ return EMOTIONAL_MOODS.indexOf(e.mood) !== -1; }).length;
+    var volatileEmoRate = volatileEntries.length > 0 ? (volatileEmotional/volatileEntries.length*100) : null;
+    var calmEmoRate = calmEntries.length > 0 ? (calmEmotional/calmEntries.length*100) : null;
+
+    var patternInsight = null;
+    if(volatileEmoRate != null && calmEmoRate != null && volatileEmoRate > calmEmoRate + 10){
+      patternInsight = '시장 변동성이 커질수록 감정적 매매가 증가하고 있습니다.';
+    }else if(principleRows.length > 0){
+      var worstForInsight = principleRows.slice().sort(function(a,b){ return a.rate - b.rate; })[0];
+      if(worstForInsight.rate < 70){
+        patternInsight = '"'+worstForInsight.text+'" 원칙에서 반복적으로 흔들리고 있어요. 이 부분만 의식해도 준수율이 크게 오를 수 있어요.';
+      }
+    }
+    if(patternInsight){
+      html += '<p class="card-title" style="margin-top:18px;">🧠 나의 투자 패턴</p>';
+      html += '<p style="font-size:13px;color:var(--ink-soft);line-height:1.6;font-style:italic;">"'+escapeHtml(patternInsight)+'"</p>';
+    }
 
     if((typeMode === 'all' || typeMode === 'buy') && hasBuyAmt){
       html += '<div class="statsline">매수 총액 · <b>'+formatWon(buyTotal)+'원</b></div>';
