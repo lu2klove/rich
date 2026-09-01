@@ -1594,9 +1594,19 @@
 
     <div class="field" id="tickerField" style="display:none;">
       <span class="field-label">종목 (선택)</span>
-      <div class="ticker-combo">
-        <input type="text" id="tickerInput" placeholder="예: 삼성전자, TSLA" autocomplete="off">
-        <div class="ticker-dropdown" id="tickerDropdown"></div>
+      <div class="ticker-combo" style="display:flex;gap:8px;">
+        <div style="position:relative;flex:1;">
+          <input type="text" id="tickerInput" placeholder="예: 삼성전자, TSLA" autocomplete="off" style="width:100%;">
+          <div class="ticker-dropdown" id="tickerDropdown"></div>
+        </div>
+        <select id="tickerIndexSelect" style="max-width:118px;">
+          <option value="">지수 미지정</option>
+          <option value="kospi">📈 코스피</option>
+          <option value="kosdaq">💹 코스닥</option>
+          <option value="dow">🏛️ 다우존스</option>
+          <option value="snp500">⭐ S&P500</option>
+          <option value="nasdaq">💻 나스닥</option>
+        </select>
       </div>
     </div>
 
@@ -2345,6 +2355,23 @@ window.addEventListener('error', function(ev){
     else{ tickerRegistry.push({ ticker:ticker, category:'domestic', account:account }); }
     await saveTickerRegistry();
   }
+  var TICKER_INDEX_META = {
+    kospi: { label:'코스피', icon:'📈' },
+    kosdaq: { label:'코스닥', icon:'💹' },
+    dow: { label:'다우존스', icon:'🏛️' },
+    snp500: { label:'S&P500', icon:'⭐' },
+    nasdaq: { label:'나스닥', icon:'💻' }
+  };
+  function getTickerIndex(ticker){
+    var found = tickerRegistry.find(function(t){ return t.ticker === ticker; });
+    return found && found.indexKey ? found.indexKey : '';
+  }
+  async function setTickerIndex(ticker, indexKey){
+    var found = tickerRegistry.find(function(t){ return t.ticker === ticker; });
+    if(found){ found.indexKey = indexKey; }
+    else{ tickerRegistry.push({ ticker:ticker, category:'domestic', indexKey:indexKey }); }
+    await saveTickerRegistry();
+  }
   async function fetchNaverPrice(codeOrName){
     var cleanInput = codeOrName.replace(/\.KS$|\.KQ$/i, '').trim();
     var isCode = /^\d{6}$/.test(cleanInput);
@@ -2439,6 +2466,7 @@ window.addEventListener('error', function(ev){
         closeTickerDropdown();
         updateHoldingRef();
         renderEntryAccountOptions(getTickerAccount(opt.getAttribute('data-ticker')));
+        document.getElementById('tickerIndexSelect').value = getTickerIndex(opt.getAttribute('data-ticker'));
       });
     });
     document.getElementById('tickerNewOption').addEventListener('click', function(){
@@ -3217,8 +3245,9 @@ window.addEventListener('error', function(ev){
     });
     html += '</select>';
     html += '<select id="stockStatusIndexSelect"><option value="">전체 지수</option>';
-    Object.keys(INDEX_CATEGORY_MAP).forEach(function(name){
-      html += '<option value="'+name+'"'+(stockStatusIndexFilter===name?' selected':'')+'>'+name+'</option>';
+    Object.keys(TICKER_INDEX_META).forEach(function(key){
+      var m = TICKER_INDEX_META[key];
+      html += '<option value="'+key+'"'+(stockStatusIndexFilter===key?' selected':'')+'>'+m.icon+' '+m.label+'</option>';
     });
     html += '</select>';
     html += '</div>';
@@ -3228,8 +3257,7 @@ window.addEventListener('error', function(ev){
       holdingsForStatus = holdingsForStatus.filter(function(h){ return getTickerAccount(h.ticker) === stockStatusAccount; });
     }
     if(stockStatusIndexFilter){
-      var wantCat = INDEX_CATEGORY_MAP[stockStatusIndexFilter];
-      holdingsForStatus = holdingsForStatus.filter(function(h){ return h.category === wantCat; });
+      holdingsForStatus = holdingsForStatus.filter(function(h){ return getTickerIndex(h.ticker) === stockStatusIndexFilter; });
     }
 
     if(holdingsForStatus.length === 0){
@@ -3239,8 +3267,9 @@ window.addEventListener('error', function(ev){
       holdingsForStatus.forEach(function(h){
         var lossPct = -h.profitPct;
         var tier = computeRiskTier(lossPct, sellSettings.stopLossPct);
+        var idxMeta = TICKER_INDEX_META[getTickerIndex(h.ticker)];
         html += '<tr>';
-        html += '<td>'+escapeHtml(h.ticker)+'</td>';
+        html += '<td>'+(idxMeta?idxMeta.icon+' ':'')+escapeHtml(h.ticker)+'</td>';
         html += '<td>'+formatWon(h.currentPrice)+'원</td>';
         html += '<td>'+(lossPct>=0 ? lossPct.toFixed(1)+'%' : '이익 '+Math.abs(lossPct).toFixed(1)+'%')+'</td>';
         html += '<td style="color:'+tier.color+';font-weight:700;white-space:nowrap;">'+tier.emoji+' '+tier.label+'</td>';
@@ -3350,6 +3379,82 @@ window.addEventListener('error', function(ev){
     return html;
   }
 
+  var refreshAllStatusMessage = { text:'', color:'' };
+  async function refreshAllHoldingPrices(){
+    var statusEl = document.getElementById('refreshAllStatus');
+    var holdings = computeHoldings();
+    if(holdings.length === 0 || !statusEl) return;
+    statusEl.style.color = 'var(--ink-soft)';
+    statusEl.textContent = '조회 중… (0/'+holdings.length+')';
+
+    var successCount = 0, failCount = 0;
+    var domesticWithCode = [];
+    var others = [];
+    holdings.forEach(function(h){
+      var symbol = getTickerSymbol(h.ticker);
+      var isCode = /^\d{6}$/.test((symbol||'').replace(/\.KS$|\.KQ$/i,''));
+      if(h.category === 'domestic' && isCode){
+        domesticWithCode.push({ ticker:h.ticker, code:symbol.replace(/\.KS$|\.KQ$/i,'') });
+      }else{
+        others.push(h);
+      }
+    });
+
+    if(domesticWithCode.length > 0){
+      try{
+        var codes = domesticWithCode.map(function(x){ return x.code; }).join(',');
+        var res = await fetch('/api/naver-price?codes=' + encodeURIComponent(codes));
+        var data = await res.json();
+        if(res.ok && data.results){
+          domesticWithCode.forEach(function(x){
+            var entry = data.results[x.code];
+            if(entry){
+              currentPrices[x.ticker] = entry.price;
+              successCount++;
+            }else{
+              failCount++;
+            }
+          });
+        }else{
+          failCount += domesticWithCode.length;
+        }
+      }catch(e){
+        failCount += domesticWithCode.length;
+      }
+      statusEl.textContent = '조회 중… ('+(successCount+failCount)+'/'+holdings.length+')';
+    }
+
+    for(var i=0; i<others.length; i++){
+      var h = others[i];
+      var symbol = getTickerSymbol(h.ticker) || h.ticker;
+      try{
+        var price;
+        if(h.category === 'domestic'){
+          var result = await fetchNaverPrice(symbol);
+          price = result.price;
+          if(result.code) await setTickerSymbol(h.ticker, result.code);
+        }else{
+          price = await fetchYahooPrice(symbol);
+        }
+        currentPrices[h.ticker] = price;
+        successCount++;
+      }catch(e){
+        failCount++;
+      }
+      statusEl.textContent = '조회 중… ('+(successCount+failCount)+'/'+holdings.length+')';
+    }
+
+    await saveCurrentPrices();
+    refreshAllStatusMessage.color = failCount > 0 ? 'var(--brick)' : 'var(--pine)';
+    refreshAllStatusMessage.text = successCount+'개 갱신 완료' + (failCount>0 ? ' · '+failCount+'개 실패(직접 입력 필요)' : '');
+    renderAssetScreen();
+    setTimeout(function(){
+      refreshAllStatusMessage.text = '';
+      var el = document.getElementById('refreshAllStatus');
+      if(el) el.textContent = '';
+    }, 4000);
+  }
+
   function wirePortfolioSectionEvents(){
     document.querySelectorAll('#portfolioSection .viewtogglebtn').forEach(function(btn){
       btn.addEventListener('click', function(){
@@ -3435,6 +3540,10 @@ window.addEventListener('error', function(ev){
       html += '</select>';
     }
     html += '</div>';
+    if(holdings.length > 0){
+      html += '<button class="cancelbtn" id="refreshAllPricesBtn" type="button" style="width:100%;margin-bottom:12px;">🔄 최신 시세 조회</button>';
+      html += '<p class="fetch-status" id="refreshAllStatus" style="color:'+(refreshAllStatusMessage.color||'var(--ink-soft)')+';">'+escapeHtml(refreshAllStatusMessage.text)+'</p>';
+    }
 
     if(holdings.length === 0){
       html += '<p class="empty-inline">아직 보유 중인 종목이 없어요. 매수 기록을 남기면 여기 나타나요.</p>';
@@ -3453,16 +3562,19 @@ window.addEventListener('error', function(ev){
 
         html += '<div class="holdings-grid">';
         pageHoldings.forEach(function(h){
+        var idxMeta = TICKER_INDEX_META[getTickerIndex(h.ticker)];
         html += '<div class="holding-item">';
-        html += '<div class="holding-top"><span class="holding-name">'+escapeHtml(h.ticker)+'</span><span class="holding-amt">'+formatWon(h.marketValue)+'원</span></div>';
-        html += '<div class="holding-sub">'+formatQty(h.qty)+'주 · 평균매입 '+formatWon(h.avgPrice)+'원</div>';
+        html += '<div class="holding-top"><span class="holding-name">'+(idxMeta?idxMeta.icon+' ':'')+escapeHtml(h.ticker)+'</span><span class="holding-amt">'+formatWon(h.marketValue)+'원</span></div>';
+        html += '<div class="holding-sub">'+formatQty(h.qty)+'주 · 평균매입 '+formatWon(h.avgPrice)+'원'+(h.currentPrice!=null?' · 현재가 '+formatWon(h.currentPrice)+'원':'')+'</div>';
         if(h.profit != null){
           var pc = h.profit >= 0 ? 'var(--brick)' : 'var(--blue)';
-          html += '<div class="holding-sub" style="color:'+pc+';font-weight:600;">'+(h.profit>=0?'+':'')+formatWon(h.profit)+'원 ('+(h.profitPct>=0?'+':'')+h.profitPct.toFixed(1)+'%)</div>';
+          html += '<div class="holding-sub" style="color:'+pc+';font-weight:600;">평가수익 '+(h.profit>=0?'+':'')+formatWon(h.profit)+'원 ('+(h.profitPct>=0?'+':'')+h.profitPct.toFixed(1)+'%)</div>';
         }
         var stopLossAmt = h.marketValue * (1 - sellSettings.stopLossPct/100);
         var takeProfitAmt = h.marketValue * (1 + sellSettings.takeProfitPct/100);
-        html += '<div class="holding-sub sltp-line">손절가 <b style="color:var(--blue);">'+formatWon(stopLossAmt)+'원</b> · 익절가 <b style="color:var(--brick);">'+formatWon(takeProfitAmt)+'원</b></div>';
+        var stopLossUnit = h.currentPrice != null ? h.currentPrice * (1 - sellSettings.stopLossPct/100) : null;
+        var takeProfitUnit = h.currentPrice != null ? h.currentPrice * (1 + sellSettings.takeProfitPct/100) : null;
+        html += '<div class="holding-sub sltp-line">손절가 <b style="color:var(--blue);">'+formatWon(stopLossAmt)+'원</b>'+(stopLossUnit!=null?'(단가 '+formatWon(stopLossUnit)+'원)':'')+' · 익절가 <b style="color:var(--brick);">'+formatWon(takeProfitAmt)+'원</b>'+(takeProfitUnit!=null?'(단가 '+formatWon(takeProfitUnit)+'원)':'')+'</div>';
         var holdingSafeId = escapeHtml(h.ticker).replace(/[^a-zA-Z0-9]/g,'_');
         html += '<button class="holding-toggle-btn" data-toggle-id="'+holdingSafeId+'" type="button">펼쳐보기 ▾</button>';
         html += '<div class="holding-row2" id="holdingDetails_'+holdingSafeId+'" style="display:none;">';
@@ -3734,6 +3846,10 @@ window.addEventListener('error', function(ev){
         holdingsPage = 1;
         renderAssetScreen();
       });
+    }
+    var refreshAllBtn = document.getElementById('refreshAllPricesBtn');
+    if(refreshAllBtn){
+      refreshAllBtn.addEventListener('click', refreshAllHoldingPrices);
     }
     var heroAccountSelectEl = document.getElementById('heroAccountSelect');
     if(heroAccountSelectEl){
@@ -4552,6 +4668,7 @@ window.addEventListener('error', function(ev){
     document.querySelectorAll('#marketChips .chip').forEach(function(c){ c.classList.remove('selected'); });
     document.querySelectorAll('#moodChips .chip').forEach(function(c){ c.classList.remove('selected'); });
     document.getElementById('tickerInput').value = '';
+    document.getElementById('tickerIndexSelect').value = '';
     document.getElementById('qtyInput').value = '';
     document.getElementById('priceInput').value = '';
     document.getElementById('totalLine').textContent = '';
@@ -4587,6 +4704,7 @@ window.addEventListener('error', function(ev){
       c.classList.toggle('selected', c.getAttribute('data-mood') === e.mood);
     });
     document.getElementById('tickerInput').value = e.ticker || '';
+    document.getElementById('tickerIndexSelect').value = e.ticker ? getTickerIndex(e.ticker) : '';
     document.getElementById('qtyInput').value = (e.quantity != null) ? e.quantity : '';
     document.getElementById('priceInput').value = (e.price != null) ? e.price : '';
     updateTotalLine();
@@ -4765,6 +4883,8 @@ window.addEventListener('error', function(ev){
       if(acctVal && acctVal !== '__new__'){
         await setTickerAccount(payload.ticker, acctVal);
       }
+      var idxVal = document.getElementById('tickerIndexSelect').value;
+      await setTickerIndex(payload.ticker, idxVal);
     }
     toast.style.color = 'var(--pine)';
     toast.textContent = editingId ? '기록을 수정했어요' : '오늘 기록을 남겼어요';
@@ -4903,8 +5023,26 @@ window.addEventListener('error', function(ev){
       }
     });
 
-    document.getElementById('exportBtn').addEventListener('click', function(){
-      var blob = new Blob([JSON.stringify(entries, null, 2)], {type:'application/json'});
+    document.getElementById('exportBtn').addEventListener('click', async function(){
+      var passwordHash = await getStoredHash();
+      var data = {
+        entries: entries,
+        accounts: accounts,
+        tickerRegistry: tickerRegistry,
+        currentPrices: currentPrices,
+        sellSettings: sellSettings,
+        checklistItems: checklistItems,
+        checklistThresholdPct: sellChecklistThresholdPct,
+        customMoods: customMoods,
+        otherAssets: otherAssets,
+        indexData: indexData,
+        riskThresholds: riskThresholds,
+        passwordHash: passwordHash,
+        exportedAt: new Date().toISOString(),
+        app: 'investment-journal',
+        version: 2
+      };
+      var blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
       var url = URL.createObjectURL(blob);
       var a = document.createElement('a');
       a.href = url;
@@ -4931,15 +5069,69 @@ window.addEventListener('error', function(ev){
         var t = document.getElementById('backupToast');
         try{
           var imported = JSON.parse(e.target.result);
-          if(!Array.isArray(imported)) throw new Error('파일 형식이 올바르지 않아요');
-          imported.forEach(function(imp){
+
+          // Backward compatibility: very old backups were a plain array of entries only.
+          var entryList = Array.isArray(imported) ? imported : imported.entries;
+          if(!Array.isArray(entryList)) throw new Error('파일 형식이 올바르지 않아요');
+          entryList.forEach(function(imp){
             var idx = entries.findIndex(function(x){ return x.id === imp.id; });
             if(idx > -1) entries[idx] = imp; else entries.push(imp);
           });
           await saveEntries();
+
+          var restoredParts = [];
+          if(!Array.isArray(imported)){
+            if(Array.isArray(imported.accounts)){
+              accounts = imported.accounts;
+              await saveAccounts();
+              restoredParts.push('계좌');
+            }
+            if(Array.isArray(imported.tickerRegistry)){
+              tickerRegistry = imported.tickerRegistry;
+              await saveTickerRegistry();
+            }
+            if(imported.currentPrices && typeof imported.currentPrices === 'object'){
+              currentPrices = imported.currentPrices;
+              await saveCurrentPrices();
+            }
+            if(imported.sellSettings && typeof imported.sellSettings === 'object'){
+              sellSettings = imported.sellSettings;
+              await saveSellSettings();
+            }
+            if(Array.isArray(imported.checklistItems)){
+              checklistItems = imported.checklistItems;
+              await saveChecklistItems();
+            }
+            if(imported.checklistThresholdPct != null){
+              sellChecklistThresholdPct = imported.checklistThresholdPct;
+              await saveChecklistThreshold();
+            }
+            if(Array.isArray(imported.customMoods)){
+              customMoods = imported.customMoods;
+              await saveCustomMoods();
+            }
+            if(Array.isArray(imported.otherAssets)){
+              otherAssets = imported.otherAssets;
+              await saveOtherAssets();
+            }
+            if(imported.indexData && typeof imported.indexData === 'object'){
+              indexData = imported.indexData;
+              await saveIndexData();
+            }
+            if(imported.riskThresholds && typeof imported.riskThresholds === 'object'){
+              riskThresholds = Object.assign({wti:0,us10y:0,us30y:0,fx:0}, imported.riskThresholds);
+              await saveRiskThresholds();
+              restoredParts.push('지수관리');
+            }
+            if(imported.passwordHash){
+              await setStoredHash(imported.passwordHash);
+              restoredParts.push('비밀번호');
+            }
+          }
+
           renderAll(false);
           t.style.color = 'var(--pine)';
-          t.textContent = imported.length + '개 기록을 불러왔어요';
+          t.textContent = entryList.length + '개 기록을 불러왔어요' + (restoredParts.length ? ' (' + restoredParts.join('·') + ' 포함)' : '');
         }catch(err){
           t.style.color = 'var(--brick)';
           t.textContent = '가져오기 실패: ' + (err && err.message ? err.message : err);
