@@ -3256,8 +3256,9 @@ window.addEventListener('error', function(ev){
         var lossPct = -h.profitPct;
         var tier = computeRiskTier(lossPct, sellSettings.stopLossPct);
         var idxMeta = TICKER_INDEX_META[getTickerIndex(h.ticker)];
-        html += '<tr>';
-        html += '<td>'+(idxMeta?idxMeta.icon+' ':'')+escapeHtml(h.ticker)+'</td>';
+        var isStockClickable = tier.label === '위험' || tier.label === '경계';
+        html += '<tr'+(isStockClickable ? ' class="stock-row-clickable" style="cursor:pointer;"' : '')+'>';
+        html += '<td>'+(idxMeta?idxMeta.icon+' ':'')+escapeHtml(h.ticker)+(isStockClickable?' 👆':'')+'</td>';
         html += '<td>'+formatWon(h.currentPrice)+'원</td>';
         html += '<td><span style="color:'+(h.profitPct>=0?'var(--brick)':'var(--blue)')+';font-weight:600;">'+(h.profitPct>=0?'+':'-')+Math.abs(h.profitPct).toFixed(1)+'%</span></td>';
         html += '<td style="color:'+tier.color+';font-weight:700;white-space:nowrap;">'+tier.emoji+' '+tier.label+'</td>';
@@ -3317,22 +3318,19 @@ window.addEventListener('error', function(ev){
         stockStatusIndexFilter = indexKey;
         renderSellChecklistScreen();
         setTimeout(function(){
-          var filteredHoldings = computeHoldings().filter(function(h){ return h.profitPct != null; });
-          if(stockStatusAccount){
-            filteredHoldings = filteredHoldings.filter(function(h){ return getTickerAccount(h.ticker) === stockStatusAccount; });
-          }
-          filteredHoldings = filteredHoldings.filter(function(h){ return getTickerIndex(h.ticker) === indexKey; });
-          var anyRisky = filteredHoldings.some(function(h){
-            var t = computeRiskTier(-h.profitPct, sellSettings.stopLossPct);
-            return t.label === '위험' || t.label === '경계';
-          });
-          var target = anyRisky ? document.getElementById('investLogicSection') : document.getElementById('stockStatusSection');
+          var target = document.getElementById('stockStatusSection');
           if(target) target.scrollIntoView({ behavior:'smooth', block:'start' });
-          if(anyRisky && target){
-            target.classList.add('highlight-pulse');
-            setTimeout(function(){ target.classList.remove('highlight-pulse'); }, 2000);
-          }
         }, 50);
+      });
+    });
+    document.querySelectorAll('.stock-row-clickable').forEach(function(row){
+      row.addEventListener('click', function(){
+        var target = document.getElementById('investLogicSection');
+        if(target){
+          target.scrollIntoView({ behavior:'smooth', block:'start' });
+          target.classList.add('highlight-pulse');
+          setTimeout(function(){ target.classList.remove('highlight-pulse'); }, 2000);
+        }
       });
     });
     document.getElementById('stockStatusAccountSelect').addEventListener('change', function(){
