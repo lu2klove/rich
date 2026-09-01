@@ -3619,14 +3619,14 @@ window.addEventListener('error', function(ev){
         var stopLossUnit = h.currentPrice != null ? h.currentPrice * (1 - sellSettings.stopLossPct/100) : null;
         var takeProfitUnit = h.currentPrice != null ? h.currentPrice * (1 + sellSettings.takeProfitPct/100) : null;
         html += '<div class="holding-sub sltp-line">손절가 <b style="color:var(--blue);">'+formatWon(stopLossAmt)+'원</b>'+(stopLossUnit!=null?'(단가 '+formatWon(stopLossUnit)+'원)':'')+' · 익절가 <b style="color:var(--brick);">'+formatWon(takeProfitAmt)+'원</b>'+(takeProfitUnit!=null?'(단가 '+formatWon(takeProfitUnit)+'원)':'')+'</div>';
-        var holdingSafeId = escapeHtml(h.ticker).replace(/[^a-zA-Z0-9]/g,'_');
+        var holdingSafeId = tickerToSafeId(h.ticker);
         html += '<button class="holding-toggle-btn" data-toggle-id="'+holdingSafeId+'" type="button">펼쳐보기 ▾</button>';
         html += '<div class="holding-row2" id="holdingDetails_'+holdingSafeId+'" style="display:none;">';
         html += '<div class="symbol-row">';
         html += '<input type="text" class="symbolInput2" data-ticker="'+escapeHtml(h.ticker)+'" placeholder="종목코드, 종목명(국내), 또는 AAPL 등" value="'+escapeHtml(getTickerSymbol(h.ticker))+'">';
         html += '<button class="fetchbtn" data-ticker="'+escapeHtml(h.ticker)+'" type="button">🔄 조회</button>';
         html += '</div>';
-        html += '<p class="fetch-status" id="fetchStatus_'+escapeHtml(h.ticker).replace(/[^a-zA-Z0-9]/g,'_')+'"></p>';
+        html += '<p class="fetch-status" id="fetchStatus_'+tickerToSafeId(h.ticker)+'"></p>';
         html += '<input type="text" inputmode="numeric" class="priceInput2" data-ticker="'+escapeHtml(h.ticker)+'" placeholder="현재가 입력" value="'+(h.currentPrice!=null?h.currentPrice:'')+'">';
         html += '<div class="chiprow cat-chiprow" data-ticker="'+escapeHtml(h.ticker)+'">';
         ['domestic','overseas','crypto'].forEach(function(catKey){
@@ -3838,7 +3838,7 @@ window.addEventListener('error', function(ev){
     document.querySelectorAll('.fetchbtn').forEach(function(btn){
       btn.addEventListener('click', async function(){
         var ticker = btn.getAttribute('data-ticker');
-        var safeId = ticker.replace(/[^a-zA-Z0-9]/g,'_');
+        var safeId = tickerToSafeId(ticker);
         var statusEl = document.getElementById('fetchStatus_'+safeId);
         var symbolInp = btn.closest('.symbol-row').querySelector('.symbolInput2');
         var symbol = symbolInp ? symbolInp.value.trim() : '';
@@ -4657,6 +4657,13 @@ window.addEventListener('error', function(ev){
     var d = document.createElement('div');
     d.textContent = s;
     return d.innerHTML;
+  }
+  function tickerToSafeId(ticker){
+    // Encodes the full ticker (not just its length) so that different
+    // Korean names of the same character count never collide, unlike a
+    // naive [^a-zA-Z0-9]->'_' strip which turns e.g. "에코프로" and
+    // "삼성전자" (both 4 characters) into the identical "____".
+    return encodeURIComponent(ticker).replace(/%/g, '_');
   }
 
   // ---------- Form ----------
