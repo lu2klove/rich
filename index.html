@@ -697,6 +697,16 @@
     font-size:13.5px;
     color:var(--ink);
   }
+  .principle-item{
+    padding:10px 0;
+    border-bottom:1px solid var(--line);
+  }
+  .principle-item:last-child{ border-bottom:none; }
+  .principle-text{
+    font-size:13px;
+    color:var(--ink);
+    margin:0 0 8px;
+  }
   .checklist-manage-row{
     display:flex;
     gap:8px;
@@ -1717,6 +1727,11 @@
         <button class="chip tradeMoodOnly" data-mood="🐑" type="button" style="display:none;">🐑 뇌동매매</button>
         <button class="chip tradeMoodOnly" data-mood="🔥" type="button" style="display:none;">🔥 포모</button>
       </div>
+    </div>
+
+    <div class="field" id="principlesField" style="display:none;">
+      <span class="field-label field-label-strong">📋 투자원칙 체크</span>
+      <div id="principlesList"></div>
     </div>
 
     <div class="field">
@@ -4342,6 +4357,67 @@ window.addEventListener('error', function(ev){
   var marketLabel = { up:'상승장', down:'하락장', sideways:'횡보장', volatile:'변동성' };
   var PERIOD_LABEL_MAP = { all:'전체', thisweek:'이번 주', lastweek:'지난 주', thismonth:'이번 달', quarter:'분기' };
   var EMOTIONAL_MOODS = ['😰','😤','🐑','🔥'];
+  var INVESTMENT_PRINCIPLES = [
+    { id:'R01', text:'시장 급락 시 위험관리', applies:['buy','sell'] },
+    { id:'R02', text:'종목 급락 시 위험관리', applies:['sell'] },
+    { id:'R03', text:'급등주 추격매수 금지', applies:['buy'] },
+    { id:'R04', text:'레버리지 투자 금지', applies:['buy'] },
+    { id:'R05', text:'현금비중 유지', applies:['buy'] },
+    { id:'R06', text:'투자이유가 명확한 경우만 매수', applies:['buy'] },
+    { id:'R07', text:'감정적 매매 금지', applies:['buy','sell'] },
+    { id:'R08', text:'손실 확대 시 물타기 금지', applies:['buy'] },
+    { id:'R09', text:'매도 기준 발생 시 대응', applies:['sell'] },
+    { id:'R10', text:'5년 후에도 보유할 수 있는 기업인가', applies:['buy'] }
+  ];
+  function principlesForType(type){
+    return INVESTMENT_PRINCIPLES.filter(function(p){ return p.applies.indexOf(type) !== -1; });
+  }
+  var entryPrinciples = {};
+  function renderPrinciplesChecklist(type){
+    var field = document.getElementById('principlesField');
+    var list = document.getElementById('principlesList');
+    if(!field || !list) return;
+    var applicable = principlesForType(type);
+    if(type === 'watch' || applicable.length === 0){
+      field.style.display = 'none';
+      return;
+    }
+    field.style.display = 'block';
+    var html = '';
+    applicable.forEach(function(p){
+      var cur = entryPrinciples[p.id] || {};
+      html += '<div class="principle-item">';
+      html += '<p class="principle-text">'+escapeHtml(p.text)+'</p>';
+      html += '<div class="chiprow" data-pid="'+p.id+'">';
+      html += '<button class="chip principleChip'+(cur.result==='PASS'?' selected':'')+'" data-result="PASS" type="button">✅ 준수</button>';
+      html += '<button class="chip principleChip'+(cur.result==='FAIL'?' selected':'')+'" data-result="FAIL" type="button">❌ 위반</button>';
+      html += '<button class="chip principleChip'+(cur.result==='NA'?' selected':'')+'" data-result="NA" type="button">➖ 해당없음</button>';
+      html += '</div>';
+      if(cur.result === 'FAIL'){
+        html += '<input type="text" class="principleNote" data-pid="'+p.id+'" placeholder="위반 사유 (선택)" value="'+escapeHtml(cur.note||'')+'" style="margin-top:6px;">';
+      }
+      html += '</div>';
+    });
+    list.innerHTML = html;
+
+    list.querySelectorAll('.principleChip').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var pid = btn.closest('[data-pid]').getAttribute('data-pid');
+        var result = btn.getAttribute('data-result');
+        if(!entryPrinciples[pid]) entryPrinciples[pid] = {};
+        entryPrinciples[pid].result = result;
+        if(result !== 'FAIL') entryPrinciples[pid].note = '';
+        renderPrinciplesChecklist(type);
+      });
+    });
+    list.querySelectorAll('.principleNote').forEach(function(inp){
+      inp.addEventListener('input', function(){
+        var pid = inp.getAttribute('data-pid');
+        if(!entryPrinciples[pid]) entryPrinciples[pid] = {};
+        entryPrinciples[pid].note = inp.value;
+      });
+    });
+  }
 
   function formatWon(n){
     return Math.round(n).toLocaleString('ko-KR');
@@ -4762,12 +4838,26 @@ window.addEventListener('error', function(ev){
     var herdCount = periodEntries.filter(function(e){ return e.mood === '🐑'; }).length;
     var emotionalCount = periodEntries.filter(function(e){ return EMOTIONAL_MOODS.indexOf(e.mood) !== -1; }).length;
 
+    var passCount = 0, failCount = 0;
+    periodEntries.forEach(function(e){
+      if(!Array.isArray(e.principles)) return;
+      e.principles.forEach(function(p){
+        if(p.result === 'PASS') passCount++;
+        else if(p.result === 'FAIL') failCount++;
+      });
+    });
+    var principleApplied = passCount + failCount;
+    var complianceRate = principleApplied > 0 ? (passCount / principleApplied * 100) : null;
+
     var periodLabel = PERIOD_LABEL_MAP[periodMode] || '전체';
 
     var html = '<div class="report-card">';
     html += '<p class="report-card-title">📊 나의 투자 성적표</p>';
     html += '<p class="report-card-sub">('+periodLabel+')</p>';
     html += '<div class="report-card-divider"></div>';
+    if(complianceRate != null){
+      html += '<div class="report-card-row"><span>투자원칙 준수율</span><b style="color:'+(complianceRate>=80?'var(--pine)':(complianceRate>=60?'var(--olive)':'var(--brick)'))+';font-size:15px;">'+complianceRate.toFixed(1)+'%</b></div>';
+    }
     html += '<div class="report-card-row"><span>매수</span><b>'+counts.buy+'회</b></div>';
     html += '<div class="report-card-row"><span>매도</span><b>'+counts.sell+'회</b></div>';
     html += '<div class="report-card-row"><span>관망</span><b>'+counts.watch+'회</b></div>';
@@ -4993,6 +5083,7 @@ window.addEventListener('error', function(ev){
     document.querySelectorAll('.tradeMoodOnly').forEach(function(el){
       el.style.display = showTrade ? '' : 'none';
     });
+    renderPrinciplesChecklist(t);
     updateHoldingRef();
   }
   function setMarket(m){
@@ -5042,6 +5133,7 @@ window.addEventListener('error', function(ev){
 
   function resetForm(){
     editingId = null;
+    entryPrinciples = {};
     selected = { type:'watch', market:null, mood:null };
     setType('watch');
     document.querySelectorAll('#marketChips .chip').forEach(function(c){ c.classList.remove('selected'); });
@@ -5074,6 +5166,12 @@ window.addEventListener('error', function(ev){
     var e = entries.find(function(x){ return x.id === id; });
     if(!e) return;
     editingId = id;
+    entryPrinciples = {};
+    if(Array.isArray(e.principles)){
+      e.principles.forEach(function(p){
+        entryPrinciples[p.id] = { result: p.result, note: p.note || '' };
+      });
+    }
     selected = { type:e.type, market:e.market||null, mood:e.mood||null };
     setType(e.type);
     document.querySelectorAll('#marketChips .chip').forEach(function(c){
@@ -5228,6 +5326,14 @@ window.addEventListener('error', function(ev){
     var priceRaw = parseFloat(document.getElementById('priceInput').value);
     var qtyVal = (qtyRaw > 0) ? qtyRaw : null;
     var priceVal = (priceRaw > 0) ? priceRaw : null;
+    var principlesArray = principlesForType(selected.type).map(function(p){
+      var cur = entryPrinciples[p.id];
+      if(!cur || !cur.result) return null;
+      var out = { id: p.id, result: cur.result };
+      if(cur.result === 'FAIL' && cur.note) out.note = cur.note;
+      return out;
+    }).filter(function(x){ return x != null; });
+
     var payload = {
       date: dateStr,
       type: selected.type,
@@ -5238,6 +5344,7 @@ window.addEventListener('error', function(ev){
       market: selected.market,
       mood: selected.mood,
       memo: memo,
+      principles: principlesArray,
       nextCheck: document.getElementById('nextCheckInput').value.trim(),
       updatedAt: new Date().toISOString()
     };
