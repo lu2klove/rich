@@ -2362,31 +2362,91 @@ window.addEventListener('error', function(ev){
   var step3Checks = {};
 
   // ---------- 투자논리 진단 시스템 ----------
-  var THESIS_DAMAGE_ITEMS = [
-    { id:'foreign', text:'외국인 수급 감소' },
-    { id:'inst', text:'기관 수급 감소' },
-    { id:'rates', text:'금리 환경이 불리하게 변했다' },
-    { id:'competitiveness', text:'기업 경쟁력이 훼손됐다' },
-    { id:'cycle', text:'산업 사이클이 불리하게 변했다' },
-    { id:'assumption', text:'내 투자 가정이 틀렸다' }
-  ];
+  function makeDefaultThesisItems(){
+    return [
+      { id:'foreign', text:'외국인 수급 감소' },
+      { id:'inst', text:'기관 수급 감소' },
+      { id:'rates', text:'금리 환경이 불리하게 변했다' },
+      { id:'competitiveness', text:'기업 경쟁력이 훼손됐다' },
+      { id:'cycle', text:'산업 사이클이 불리하게 변했다' },
+      { id:'assumption', text:'내 투자 가정이 틀렸다' }
+    ];
+  }
+  var THESIS_ITEMS_KEY = 'investment:thesisitems';
+  var THESIS_ITEMS_LOCAL_KEY = 'investment_journal_thesisitems_v1';
+  var THESIS_DAMAGE_ITEMS = makeDefaultThesisItems();
+  async function loadThesisItems(){
+    if(hasClaudeStorage()){
+      try{
+        var res = await window.storage.get(THESIS_ITEMS_KEY, false);
+        if(res && res.value) return JSON.parse(res.value);
+        return makeDefaultThesisItems();
+      }catch(e){ return makeDefaultThesisItems(); }
+    }
+    try{
+      var raw = localStorage.getItem(THESIS_ITEMS_LOCAL_KEY);
+      return raw ? JSON.parse(raw) : makeDefaultThesisItems();
+    }catch(e){ return makeDefaultThesisItems(); }
+  }
+  async function saveThesisItems(){
+    if(hasClaudeStorage()){
+      try{ await window.storage.set(THESIS_ITEMS_KEY, JSON.stringify(THESIS_DAMAGE_ITEMS), false); }catch(e){}
+      return;
+    }
+    try{ localStorage.setItem(THESIS_ITEMS_LOCAL_KEY, JSON.stringify(THESIS_DAMAGE_ITEMS)); }catch(e){}
+  }
+
+  function makeDefaultHoldQuestions(){
+    return [
+      { id:'hq1', text:'5년 뒤에도 이 회사를 보유하고 싶은가?' },
+      { id:'hq2', text:'지금이 아니라 3년 뒤를 보고도 이 회사를 사고 싶은가?' }
+    ];
+  }
+  var HOLD_QUESTIONS_KEY = 'investment:holdquestions';
+  var HOLD_QUESTIONS_LOCAL_KEY = 'investment_journal_holdquestions_v1';
+  var HOLD_CONVICTION_QUESTIONS = makeDefaultHoldQuestions();
+  async function loadHoldQuestions(){
+    if(hasClaudeStorage()){
+      try{
+        var res = await window.storage.get(HOLD_QUESTIONS_KEY, false);
+        if(res && res.value) return JSON.parse(res.value);
+        return makeDefaultHoldQuestions();
+      }catch(e){ return makeDefaultHoldQuestions(); }
+    }
+    try{
+      var raw = localStorage.getItem(HOLD_QUESTIONS_LOCAL_KEY);
+      return raw ? JSON.parse(raw) : makeDefaultHoldQuestions();
+    }catch(e){ return makeDefaultHoldQuestions(); }
+  }
+  async function saveHoldQuestions(){
+    if(hasClaudeStorage()){
+      try{ await window.storage.set(HOLD_QUESTIONS_KEY, JSON.stringify(HOLD_CONVICTION_QUESTIONS), false); }catch(e){}
+      return;
+    }
+    try{ localStorage.setItem(HOLD_QUESTIONS_LOCAL_KEY, JSON.stringify(HOLD_CONVICTION_QUESTIONS)); }catch(e){}
+  }
+
   var SELL_REASON_OPTIONS = [
     '투자논리 훼손','시장 위험','종목 위험','수익실현','포트폴리오 조정',
     '현금 확보','다른 종목으로 교체','손실 확대 우려','단순 답답함','불안해서','조급해서','기타'
   ];
   var EMOTIONAL_SELL_REASONS = ['단순 답답함','불안해서','조급해서'];
   var investLogicTicker = null;
-  var investLogicState = {}; // { [ticker]: { checksA:{}, q1:'', q2:'', sellReason:'' } }
+  var investLogicState = {}; // { [ticker]: { checksA:{}, holdAnswers:{}, sellReason:'' } }
   function getInvestLogicState(ticker){
     if(!investLogicState[ticker]){
-      investLogicState[ticker] = { checksA:{}, q1:'', q2:'', sellReason:'' };
+      investLogicState[ticker] = { checksA:{}, holdAnswers:{}, sellReason:'' };
     }
     return investLogicState[ticker];
   }
-  function computeHoldConviction(q1, q2){
-    if(!q1 || !q2) return null;
-    if(q1 === 'no' || q2 === 'no') return { level:'낮음', emoji:'🔴', color:'var(--brick)' };
-    if(q1 === 'yes' && q2 === 'yes') return { level:'높음', emoji:'🟢', color:'var(--pine)' };
+  function computeHoldConviction(holdAnswers){
+    if(HOLD_CONVICTION_QUESTIONS.length === 0) return null;
+    var allAnswered = HOLD_CONVICTION_QUESTIONS.every(function(q){ return !!holdAnswers[q.id]; });
+    if(!allAnswered) return null;
+    var hasNo = HOLD_CONVICTION_QUESTIONS.some(function(q){ return holdAnswers[q.id] === 'no'; });
+    var allYes = HOLD_CONVICTION_QUESTIONS.every(function(q){ return holdAnswers[q.id] === 'yes'; });
+    if(hasNo) return { level:'낮음', emoji:'🔴', color:'var(--brick)' };
+    if(allYes) return { level:'높음', emoji:'🟢', color:'var(--pine)' };
     return { level:'보통', emoji:'🟡', color:'var(--olive)' };
   }
   function getMarketRiskForTicker(ticker){
@@ -3207,101 +3267,123 @@ window.addEventListener('error', function(ev){
     var body = document.getElementById('checklistManageBody');
     var html = '';
 
-    html += '<p class="card-title no-divider" style="margin-top:0;">🎯 판정 기준</p>';
-    html += '<div class="field">';
-    html += '<span class="field-label">체크한 비율이 이 값 이상이면 "매도 권장"으로 표시돼요</span>';
-    html += '<input type="text" inputmode="numeric" id="checklistThresholdInput" value="'+sellChecklistThresholdPct+'">';
-    html += '</div>';
-    html += '<button class="savebtn" id="saveChecklistThresholdBtn" type="button" style="width:100%;">저장</button>';
-    html += '<p class="toast" id="checklistThresholdToast"></p>';
-
-    html += '<p class="card-title" style="margin-top:22px;">📋 항목 목록</p>';
-    html += '<p class="savehint" style="margin-top:-6px;">🚨을 누르면 긴급 항목으로 지정돼요. 긴급 항목을 체크하면 판정 기준(%)과 상관없이 바로 매도 권장이 떠요.</p>';
-    checklistItems.forEach(function(item){
+    html += '<p class="card-title no-divider" style="margin-top:0;color:var(--brick);">🔴 A. 투자논리 훼손 항목 관리</p>';
+    html += '<p class="savehint" style="margin-top:-6px;">매도 체크리스트의 "투자논리 점검"에 표시되는 항목이에요.</p>';
+    THESIS_DAMAGE_ITEMS.forEach(function(item){
       html += '<div class="checklist-manage-row">';
-      html += '<input type="text" class="checklistEditInput" data-id="'+item.id+'" value="'+escapeHtml(item.text)+'">';
-      html += '<button class="urgentToggleBtn'+(item.urgent?' active':'')+'" data-id="'+item.id+'" type="button" aria-label="긴급 지정">🚨</button>';
-      html += '<button class="danger checklistDelBtn" data-id="'+item.id+'" type="button">삭제</button>';
+      html += '<input type="text" class="thesisEditInput" data-id="'+item.id+'" value="'+escapeHtml(item.text)+'">';
+      html += '<button class="danger thesisDelBtn" data-id="'+item.id+'" type="button">삭제</button>';
       html += '</div>';
     });
-    if(checklistItems.length === 0){
+    if(THESIS_DAMAGE_ITEMS.length === 0){
       html += '<p class="empty-inline">항목이 없어요. 아래에서 새로 추가해주세요.</p>';
     }
-
     html += '<div class="other-asset-form" style="margin-top:12px;">';
-    html += '<input type="text" id="newChecklistItemInput" placeholder="새 체크리스트 항목">';
-    html += '<button class="cancelbtn" id="addChecklistItemBtn" type="button">추가</button>';
+    html += '<input type="text" id="newThesisItemInput" placeholder="새 투자논리 훼손 항목">';
+    html += '<button class="cancelbtn" id="addThesisItemBtn" type="button">추가</button>';
+    html += '</div>';
+    html += '<button class="linklike" id="resetThesisBtn" type="button" style="margin-top:16px;">기본 목록으로 초기화</button>';
+    html += '<div id="resetThesisConfirm" style="display:none;margin-top:8px;">';
+    html += '<p class="toast" style="color:var(--brick);">기본 항목으로 되돌리고, 추가·수정한 내용은 사라져요.</p>';
+    html += '<button class="cancelbtn" id="resetThesisConfirmBtn" type="button" style="width:100%;">초기화 확인</button>';
     html += '</div>';
 
-    html += '<button class="linklike" id="resetChecklistBtn" type="button" style="margin-top:16px;">기본 목록으로 초기화</button>';
-    html += '<div id="resetChecklistConfirm" style="display:none;margin-top:8px;">';
-    html += '<p class="toast" style="color:var(--brick);">기본 10개 항목으로 되돌리고, 지금까지 추가·수정한 내용은 사라져요.</p>';
-    html += '<button class="cancelbtn" id="resetChecklistConfirmBtn" type="button" style="width:100%;">초기화 확인</button>';
+    html += '<p class="card-title" style="margin-top:24px;">📌 B. 보유 의사 질문 관리</p>';
+    html += '<p class="savehint" style="margin-top:-6px;">각 질문은 YES / 모르겠다 / NO 3지선다로 표시돼요.</p>';
+    HOLD_CONVICTION_QUESTIONS.forEach(function(q){
+      html += '<div class="checklist-manage-row">';
+      html += '<input type="text" class="holdQEditInput" data-id="'+q.id+'" value="'+escapeHtml(q.text)+'">';
+      html += '<button class="danger holdQDelBtn" data-id="'+q.id+'" type="button">삭제</button>';
+      html += '</div>';
+    });
+    if(HOLD_CONVICTION_QUESTIONS.length === 0){
+      html += '<p class="empty-inline">질문이 없어요. 아래에서 새로 추가해주세요.</p>';
+    }
+    html += '<div class="other-asset-form" style="margin-top:12px;">';
+    html += '<input type="text" id="newHoldQInput" placeholder="새 보유 의사 질문">';
+    html += '<button class="cancelbtn" id="addHoldQBtn" type="button">추가</button>';
+    html += '</div>';
+    html += '<button class="linklike" id="resetHoldQBtn" type="button" style="margin-top:16px;">기본 목록으로 초기화</button>';
+    html += '<div id="resetHoldQConfirm" style="display:none;margin-top:8px;">';
+    html += '<p class="toast" style="color:var(--brick);">기본 질문으로 되돌리고, 추가·수정한 내용은 사라져요.</p>';
+    html += '<button class="cancelbtn" id="resetHoldQConfirmBtn" type="button" style="width:100%;">초기화 확인</button>';
     html += '</div>';
 
     body.innerHTML = html;
 
-    document.getElementById('saveChecklistThresholdBtn').addEventListener('click', async function(){
-      var val = parseFloat(document.getElementById('checklistThresholdInput').value);
-      var t = document.getElementById('checklistThresholdToast');
-      if(!(val >= 0) || val > 100){
-        t.style.color = 'var(--brick)';
-        t.textContent = '0~100 사이 숫자를 입력해주세요';
-        return;
-      }
-      sellChecklistThresholdPct = val;
-      await saveChecklistThreshold();
-      t.style.color = 'var(--pine)';
-      t.textContent = '저장됐어요';
-      setTimeout(function(){ t.textContent = ''; }, 1500);
-    });
-
-    document.querySelectorAll('.checklistEditInput').forEach(function(inp){
+    document.querySelectorAll('.thesisEditInput').forEach(function(inp){
       inp.addEventListener('change', async function(){
         var id = inp.getAttribute('data-id');
-        var item = checklistItems.find(function(x){ return x.id === id; });
+        var item = THESIS_DAMAGE_ITEMS.find(function(x){ return x.id === id; });
         if(item){
           item.text = inp.value.trim() || item.text;
-          await saveChecklistItems();
+          await saveThesisItems();
         }
       });
     });
-    document.querySelectorAll('.checklistDelBtn').forEach(function(btn){
+    document.querySelectorAll('.thesisDelBtn').forEach(function(btn){
       btn.addEventListener('click', async function(){
         var id = btn.getAttribute('data-id');
-        checklistItems = checklistItems.filter(function(x){ return x.id !== id; });
-        delete step3Checks[id];
-        await saveChecklistItems();
+        THESIS_DAMAGE_ITEMS = THESIS_DAMAGE_ITEMS.filter(function(x){ return x.id !== id; });
+        Object.keys(investLogicState).forEach(function(t){ delete investLogicState[t].checksA[id]; });
+        await saveThesisItems();
         renderChecklistManageScreen();
       });
     });
-    document.querySelectorAll('.urgentToggleBtn').forEach(function(btn){
-      btn.addEventListener('click', async function(){
-        var id = btn.getAttribute('data-id');
-        var item = checklistItems.find(function(x){ return x.id === id; });
-        if(item){
-          item.urgent = !item.urgent;
-          await saveChecklistItems();
-          renderChecklistManageScreen();
+    document.getElementById('addThesisItemBtn').addEventListener('click', async function(){
+      var inp = document.getElementById('newThesisItemInput');
+      var text = inp.value.trim();
+      if(!text) return;
+      THESIS_DAMAGE_ITEMS.push({ id:'ti'+Date.now(), text:text });
+      await saveThesisItems();
+      renderChecklistManageScreen();
+    });
+    document.getElementById('resetThesisBtn').addEventListener('click', function(){
+      var box = document.getElementById('resetThesisConfirm');
+      box.style.display = (box.style.display === 'none') ? 'block' : 'none';
+    });
+    document.getElementById('resetThesisConfirmBtn').addEventListener('click', async function(){
+      THESIS_DAMAGE_ITEMS = makeDefaultThesisItems();
+      investLogicState = {};
+      await saveThesisItems();
+      renderChecklistManageScreen();
+    });
+
+    document.querySelectorAll('.holdQEditInput').forEach(function(inp){
+      inp.addEventListener('change', async function(){
+        var id = inp.getAttribute('data-id');
+        var q = HOLD_CONVICTION_QUESTIONS.find(function(x){ return x.id === id; });
+        if(q){
+          q.text = inp.value.trim() || q.text;
+          await saveHoldQuestions();
         }
       });
     });
-    document.getElementById('addChecklistItemBtn').addEventListener('click', async function(){
-      var inp = document.getElementById('newChecklistItemInput');
+    document.querySelectorAll('.holdQDelBtn').forEach(function(btn){
+      btn.addEventListener('click', async function(){
+        var id = btn.getAttribute('data-id');
+        HOLD_CONVICTION_QUESTIONS = HOLD_CONVICTION_QUESTIONS.filter(function(x){ return x.id !== id; });
+        Object.keys(investLogicState).forEach(function(t){ delete investLogicState[t].holdAnswers[id]; });
+        await saveHoldQuestions();
+        renderChecklistManageScreen();
+      });
+    });
+    document.getElementById('addHoldQBtn').addEventListener('click', async function(){
+      var inp = document.getElementById('newHoldQInput');
       var text = inp.value.trim();
       if(!text) return;
-      checklistItems.push({ id:'ci'+Date.now(), text:text, urgent:false });
-      await saveChecklistItems();
+      HOLD_CONVICTION_QUESTIONS.push({ id:'hq'+Date.now(), text:text });
+      await saveHoldQuestions();
       renderChecklistManageScreen();
     });
-    document.getElementById('resetChecklistBtn').addEventListener('click', function(){
-      var box = document.getElementById('resetChecklistConfirm');
+    document.getElementById('resetHoldQBtn').addEventListener('click', function(){
+      var box = document.getElementById('resetHoldQConfirm');
       box.style.display = (box.style.display === 'none') ? 'block' : 'none';
     });
-    document.getElementById('resetChecklistConfirmBtn').addEventListener('click', async function(){
-      checklistItems = makeDefaultChecklistItems();
-      step3Checks = {};
-      await saveChecklistItems();
+    document.getElementById('resetHoldQConfirmBtn').addEventListener('click', async function(){
+      HOLD_CONVICTION_QUESTIONS = makeDefaultHoldQuestions();
+      investLogicState = {};
+      await saveHoldQuestions();
       renderChecklistManageScreen();
     });
   }
@@ -3456,16 +3538,16 @@ window.addEventListener('error', function(ev){
       html += '<p class="savehint" style="font-weight:700;color:var(--brick);">🔴 투자논리 훼손 '+thesisCount+' / '+THESIS_DAMAGE_ITEMS.length+'</p>';
 
       html += '<p class="field-label field-label-strong" style="margin-top:20px;">📌 B. 보유 의사 점검</p>';
-      html += '<div class="field"><span class="field-label">5년 뒤에도 이 회사를 보유하고 싶은가?</span><div class="chiprow" id="holdQ1Chips">';
-      [['yes','🟢 YES'],['unsure','🟡 모르겠다'],['no','🔴 NO']].forEach(function(o){
-        html += '<button class="chip'+(ilState.q1===o[0]?' selected':'')+'" data-val="'+o[0]+'" type="button">'+o[1]+'</button>';
+      HOLD_CONVICTION_QUESTIONS.forEach(function(q){
+        html += '<div class="field"><span class="field-label">'+escapeHtml(q.text)+'</span><div class="chiprow holdQChips" data-qid="'+q.id+'">';
+        [['yes','🟢 YES'],['unsure','🟡 모르겠다'],['no','🔴 NO']].forEach(function(o){
+          html += '<button class="chip'+(ilState.holdAnswers[q.id]===o[0]?' selected':'')+'" data-val="'+o[0]+'" type="button">'+o[1]+'</button>';
+        });
+        html += '</div></div>';
       });
-      html += '</div></div>';
-      html += '<div class="field"><span class="field-label">지금이 아니라 3년 뒤를 보고도 이 회사를 사고 싶은가?</span><div class="chiprow" id="holdQ2Chips">';
-      [['yes','🟢 YES'],['unsure','🟡 모르겠다'],['no','🔴 NO']].forEach(function(o){
-        html += '<button class="chip'+(ilState.q2===o[0]?' selected':'')+'" data-val="'+o[0]+'" type="button">'+o[1]+'</button>';
-      });
-      html += '</div></div>';
+      if(HOLD_CONVICTION_QUESTIONS.length === 0){
+        html += '<p class="empty-inline">등록된 질문이 없어요. 설정 → 체크리스트 관리에서 추가할 수 있어요.</p>';
+      }
 
       html += '<p class="field-label field-label-strong" style="margin-top:20px;">😵 현재 매도하고 싶은 가장 큰 이유</p>';
       html += '<select id="sellReasonSelect" class="select-pill" style="width:100%;">';
@@ -3482,7 +3564,7 @@ window.addEventListener('error', function(ev){
         html += '</div>';
       }
 
-      var holdConviction = computeHoldConviction(ilState.q1, ilState.q2);
+      var holdConviction = computeHoldConviction(ilState.holdAnswers);
       var marketRisk = getMarketRiskForTicker(investLogicTicker);
       var stockRisk = focusedHolding ? computeRiskTier(-focusedHolding.profitPct, sellSettings.stopLossPct) : null;
       var finalVerdict = computeFinalVerdict(thesisCount, holdConviction, ilState.sellReason);
@@ -3570,24 +3652,15 @@ window.addEventListener('error', function(ev){
         renderSellChecklistScreen();
       });
     });
-    var holdQ1El = document.getElementById('holdQ1Chips');
-    if(holdQ1El){
-      holdQ1El.querySelectorAll('.chip').forEach(function(c){
+    document.querySelectorAll('.holdQChips').forEach(function(el){
+      var qid = el.getAttribute('data-qid');
+      el.querySelectorAll('.chip').forEach(function(c){
         c.addEventListener('click', function(){
-          getInvestLogicState(investLogicTicker).q1 = c.getAttribute('data-val');
+          getInvestLogicState(investLogicTicker).holdAnswers[qid] = c.getAttribute('data-val');
           renderSellChecklistScreen();
         });
       });
-    }
-    var holdQ2El = document.getElementById('holdQ2Chips');
-    if(holdQ2El){
-      holdQ2El.querySelectorAll('.chip').forEach(function(c){
-        c.addEventListener('click', function(){
-          getInvestLogicState(investLogicTicker).q2 = c.getAttribute('data-val');
-          renderSellChecklistScreen();
-        });
-      });
-    }
+    });
     var sellReasonEl = document.getElementById('sellReasonSelect');
     if(sellReasonEl){
       sellReasonEl.addEventListener('change', function(){
@@ -5639,6 +5712,8 @@ window.addEventListener('error', function(ev){
         sellSettings: sellSettings,
         checklistItems: checklistItems,
         checklistThresholdPct: sellChecklistThresholdPct,
+        thesisDamageItems: THESIS_DAMAGE_ITEMS,
+        holdConvictionQuestions: HOLD_CONVICTION_QUESTIONS,
         customMoods: customMoods,
         otherAssets: otherAssets,
         indexData: indexData,
@@ -5711,6 +5786,14 @@ window.addEventListener('error', function(ev){
             if(imported.checklistThresholdPct != null){
               sellChecklistThresholdPct = imported.checklistThresholdPct;
               await saveChecklistThreshold();
+            }
+            if(Array.isArray(imported.thesisDamageItems)){
+              THESIS_DAMAGE_ITEMS = imported.thesisDamageItems;
+              await saveThesisItems();
+            }
+            if(Array.isArray(imported.holdConvictionQuestions)){
+              HOLD_CONVICTION_QUESTIONS = imported.holdConvictionQuestions;
+              await saveHoldQuestions();
             }
             if(Array.isArray(imported.customMoods)){
               customMoods = imported.customMoods;
@@ -5905,6 +5988,8 @@ window.addEventListener('error', function(ev){
       indexData = await loadIndexData();
       riskThresholds = await loadRiskThresholds();
       checklistItems = await loadChecklistItems();
+      THESIS_DAMAGE_ITEMS = await loadThesisItems();
+      HOLD_CONVICTION_QUESTIONS = await loadHoldQuestions();
       customMoods = await loadCustomMoods();
       renderCustomMoodChips();
       sellChecklistThresholdPct = await loadChecklistThreshold();
