@@ -189,6 +189,23 @@
     cursor:pointer;
     padding:7px 12px;
   }
+  .select-pill{
+    background:var(--paper-raised);
+    border:1px solid var(--line);
+    border-radius:8px;
+    font-family:'IBM Plex Sans KR',sans-serif;
+    font-size:13px;
+    font-weight:600;
+    color:var(--ink-soft);
+    cursor:pointer;
+    padding:8px 28px 8px 12px;
+    appearance:none;
+    -webkit-appearance:none;
+    background-image:url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3e%3cpath fill='%23888' d='M1 1l5 5 5-5'/%3e%3c/svg%3e");
+    background-repeat:no-repeat;
+    background-position:right 10px center;
+    background-size:10px 7px;
+  }
   .asset-title{
     font-family:'Noto Serif KR',serif;
     font-weight:700;
@@ -1599,7 +1616,7 @@
           <input type="text" id="tickerInput" placeholder="예: 삼성전자, TSLA" autocomplete="off" style="width:100%;">
           <div class="ticker-dropdown" id="tickerDropdown"></div>
         </div>
-        <select id="tickerIndexSelect" style="max-width:118px;">
+        <select id="tickerIndexSelect" class="select-pill" style="max-width:130px;">
           <option value="">지수 미지정</option>
           <option value="kospi">📈 코스피</option>
           <option value="kosdaq">💹 코스닥</option>
@@ -3224,11 +3241,12 @@ window.addEventListener('error', function(ev){
       var current = d ? d.price : null;
       var compareVal = marketStatusMode === 'high52' ? (d ? d.fiftyTwoWeekHigh : null) : (d ? d.previousClose : null);
       var pctDrop = (current != null && compareVal != null && compareVal > 0) ? ((compareVal - current) / compareVal * 100) : null;
+      var changeSignPct = pctDrop != null ? -pctDrop : null;
       var tier = pctDrop != null ? computeRiskTier(pctDrop, sellSettings.stopLossPct) : {emoji:'⚪',label:'-',color:'var(--ink-faint)'};
       html += '<tr>';
       html += '<td>'+idx.label+'</td>';
       html += '<td>'+(current!=null ? current.toLocaleString(undefined,{maximumFractionDigits:2}) : '-')+'</td>';
-      html += '<td>'+(pctDrop!=null ? pctDrop.toFixed(1)+'%' : '-')+'</td>';
+      html += '<td>'+(changeSignPct!=null ? '<span style="color:'+(changeSignPct>=0?'var(--brick)':'var(--blue)')+';font-weight:600;">'+(changeSignPct>=0?'+':'-')+Math.abs(changeSignPct).toFixed(1)+'%</span>' : '-')+'</td>';
       html += '<td style="color:'+tier.color+';font-weight:700;white-space:nowrap;">'+tier.emoji+' '+tier.label+'</td>';
       html += '</tr>';
     });
@@ -3239,12 +3257,12 @@ window.addEventListener('error', function(ev){
     // ---- 2. 종목 현황 ----
     html += '<p class="card-title" style="margin-top:24px;">📊 종목 현황</p>';
     html += '<div class="row2" style="margin-bottom:12px;">';
-    html += '<select id="stockStatusAccountSelect"><option value="">전체 계좌</option>';
+    html += '<select id="stockStatusAccountSelect" class="select-pill" style="flex:1;"><option value="">전체 계좌</option>';
     accounts.forEach(function(acc){
       html += '<option value="'+escapeHtml(acc.name)+'"'+(stockStatusAccount===acc.name?' selected':'')+'>'+escapeHtml(acc.name)+'</option>';
     });
     html += '</select>';
-    html += '<select id="stockStatusIndexSelect"><option value="">전체 지수</option>';
+    html += '<select id="stockStatusIndexSelect" class="select-pill" style="flex:1;"><option value="">전체 지수</option>';
     Object.keys(TICKER_INDEX_META).forEach(function(key){
       var m = TICKER_INDEX_META[key];
       html += '<option value="'+key+'"'+(stockStatusIndexFilter===key?' selected':'')+'>'+m.icon+' '+m.label+'</option>';
@@ -3271,7 +3289,7 @@ window.addEventListener('error', function(ev){
         html += '<tr>';
         html += '<td>'+(idxMeta?idxMeta.icon+' ':'')+escapeHtml(h.ticker)+'</td>';
         html += '<td>'+formatWon(h.currentPrice)+'원</td>';
-        html += '<td>'+(lossPct>=0 ? lossPct.toFixed(1)+'%' : '이익 '+Math.abs(lossPct).toFixed(1)+'%')+'</td>';
+        html += '<td><span style="color:'+(h.profitPct>=0?'var(--brick)':'var(--blue)')+';font-weight:600;">'+(h.profitPct>=0?'+':'-')+Math.abs(h.profitPct).toFixed(1)+'%</span></td>';
         html += '<td style="color:'+tier.color+';font-weight:700;white-space:nowrap;">'+tier.emoji+' '+tier.label+'</td>';
         html += '</tr>';
       });
@@ -3588,6 +3606,13 @@ window.addEventListener('error', function(ev){
         ['domestic','overseas','crypto'].forEach(function(catKey){
           html += '<button class="chip catchip'+(h.category===catKey?' selected':'')+'" data-cat="'+catKey+'" type="button">'+CATEGORY_META[catKey].label+'</button>';
         });
+        html += '<select class="tickerIndexSelect2 select-pill" data-ticker="'+escapeHtml(h.ticker)+'" style="margin-left:6px;">';
+        html += '<option value="">지수 미지정</option>';
+        Object.keys(TICKER_INDEX_META).forEach(function(key){
+          var m = TICKER_INDEX_META[key];
+          html += '<option value="'+key+'"'+(getTickerIndex(h.ticker)===key?' selected':'')+'>'+m.icon+' '+m.label+'</option>';
+        });
+        html += '</select>';
         html += '</div>';
         html += '<select class="accountSelect2" data-ticker="'+escapeHtml(h.ticker)+'">';
         html += '<option value="">계좌 미지정</option>';
@@ -3837,6 +3862,12 @@ window.addEventListener('error', function(ev){
         if(portfolioViewMode === 'category'){
           updatePortfolioSection();
         }
+      });
+    });
+    document.querySelectorAll('.tickerIndexSelect2').forEach(function(sel){
+      sel.addEventListener('change', async function(){
+        var ticker = sel.getAttribute('data-ticker');
+        await setTickerIndex(ticker, sel.value);
       });
     });
     var holdingsFilterSelectEl = document.getElementById('holdingsFilterSelect');
