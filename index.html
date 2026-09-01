@@ -1401,6 +1401,44 @@
   .statsline:last-child{margin-bottom:0;}
   .statsline b{color:var(--ink);font-weight:700;}
   .empty-inline{color:var(--ink-faint);font-size:13px;margin:0;}
+  .report-card{
+    margin-bottom:14px;
+  }
+  .report-card-title{
+    text-align:center;
+    font-weight:800;
+    font-size:15px;
+    margin:0;
+  }
+  .report-card-sub{
+    text-align:center;
+    font-size:12px;
+    color:var(--ink-faint);
+    margin:2px 0 0;
+  }
+  .report-card-divider{
+    border-top:1px dashed var(--line);
+    margin:10px 0;
+  }
+  .report-card-row{
+    display:flex;
+    justify-content:space-between;
+    font-size:13.5px;
+    padding:4px 0;
+  }
+  .report-card-row span{ color:var(--ink-soft); }
+  .report-card-row b{ color:var(--ink); font-weight:700; }
+  .report-card-insight{
+    display:flex;
+    justify-content:space-between;
+    font-size:13px;
+    padding:4px 0;
+    color:var(--ink-soft);
+  }
+  .report-card-insight span:last-child{
+    color:var(--ink);
+    font-weight:700;
+  }
 
   /* ---------- Timeline ---------- */
   .daygroup{margin-bottom:16px;}
@@ -4302,6 +4340,8 @@ window.addEventListener('error', function(ev){
 
   var typeLabel = { buy:'매수', sell:'매도', watch:'관망' };
   var marketLabel = { up:'상승장', down:'하락장', sideways:'횡보장', volatile:'변동성' };
+  var PERIOD_LABEL_MAP = { all:'전체', thisweek:'이번 주', lastweek:'지난 주', thismonth:'이번 달', quarter:'분기' };
+  var EMOTIONAL_MOODS = ['😰','😤','🐑','🔥'];
 
   function formatWon(n){
     return Math.round(n).toLocaleString('ko-KR');
@@ -4647,6 +4687,32 @@ window.addEventListener('error', function(ev){
     });
   }
 
+  function computeBestWorstAction(counts, avgBuyReturn, avgSellReturn, fomoCount, herdCount){
+    var best = null, worst = null;
+
+    if(avgSellReturn != null && avgSellReturn > 0){
+      best = '제때 매도한 것';
+    }else if(counts.watch > counts.buy && (avgBuyReturn == null || avgBuyReturn < 0)){
+      best = '기다린 것';
+    }else if(fomoCount === 0 && herdCount === 0 && (counts.buy > 0 || counts.sell > 0)){
+      best = '감정에 휘둘리지 않은 것';
+    }else if(counts.watch > 0){
+      best = '기다린 것';
+    }
+
+    if(fomoCount > 0){
+      worst = '추격매수';
+    }else if(herdCount > 0){
+      worst = '뇌동매매';
+    }else if(avgBuyReturn != null && avgBuyReturn < -10){
+      worst = '고점 매수';
+    }else if(avgSellReturn != null && avgSellReturn < 0){
+      worst = '손절 타이밍을 놓친 것';
+    }
+
+    return { best: best, worst: worst };
+  }
+
   function renderStatsBlock(){
     var box = document.getElementById('statsBlock');
     var periodEntries = baseFilteredEntries();
@@ -4670,10 +4736,65 @@ window.addEventListener('error', function(ev){
       if(e.type === 'sell' && e.totalAmount){ sellTotal += e.totalAmount; hasSellAmt = true; }
     });
 
-    var html = '<div class="statsrow">';
-    html += '<span class="stat-chip watch">관망 '+counts.watch+'</span>';
-    html += '<span class="stat-chip buy">매수 '+counts.buy+'</span>';
-    html += '<span class="stat-chip sell">매도 '+counts.sell+'</span>';
+    // 평균 매수 수익률: 기간 내 매수 종목들의 "현재" 수익률 평균 (현재가가 입력된 경우만)
+    var buyReturns = [];
+    periodEntries.filter(function(e){ return e.type === 'buy' && e.ticker && e.price > 0; }).forEach(function(e){
+      var cur = currentPrices[e.ticker.trim()];
+      if(cur != null && cur > 0){
+        buyReturns.push((cur - e.price) / e.price * 100);
+      }
+    });
+    var avgBuyReturn = buyReturns.length > 0 ? (buyReturns.reduce(function(a,b){return a+b;},0) / buyReturns.length) : null;
+
+    // 평균 매도 수익률: 기간 내 매도 건들의 실현손익률 평균
+    var realizedMap = computeRealizedPLMap();
+    var sellReturns = [];
+    periodEntries.filter(function(e){ return e.type === 'sell'; }).forEach(function(e){
+      var r = realizedMap[e.id];
+      if(r && r.avgCostAtSale > 0 && e.quantity > 0){
+        var costBasis = r.avgCostAtSale * e.quantity;
+        if(costBasis > 0) sellReturns.push(r.realizedPL / costBasis * 100);
+      }
+    });
+    var avgSellReturn = sellReturns.length > 0 ? (sellReturns.reduce(function(a,b){return a+b;},0) / sellReturns.length) : null;
+
+    var fomoCount = periodEntries.filter(function(e){ return e.mood === '🔥'; }).length;
+    var herdCount = periodEntries.filter(function(e){ return e.mood === '🐑'; }).length;
+    var emotionalCount = periodEntries.filter(function(e){ return EMOTIONAL_MOODS.indexOf(e.mood) !== -1; }).length;
+
+    var periodLabel = PERIOD_LABEL_MAP[periodMode] || '전체';
+
+    var html = '<div class="report-card">';
+    html += '<p class="report-card-title">📊 나의 투자 성적표</p>';
+    html += '<p class="report-card-sub">('+periodLabel+')</p>';
+    html += '<div class="report-card-divider"></div>';
+    html += '<div class="report-card-row"><span>매수</span><b>'+counts.buy+'회</b></div>';
+    html += '<div class="report-card-row"><span>매도</span><b>'+counts.sell+'회</b></div>';
+    html += '<div class="report-card-row"><span>관망</span><b>'+counts.watch+'회</b></div>';
+    if(avgBuyReturn != null){
+      html += '<div class="report-card-row"><span>평균 매수 수익률</span><b style="color:'+(avgBuyReturn>=0?'var(--brick)':'var(--blue)')+';">'+(avgBuyReturn>=0?'+':'')+avgBuyReturn.toFixed(1)+'%</b></div>';
+    }
+    if(avgSellReturn != null){
+      html += '<div class="report-card-row"><span>평균 매도 수익률</span><b style="color:'+(avgSellReturn>=0?'var(--brick)':'var(--blue)')+';">'+(avgSellReturn>=0?'+':'')+avgSellReturn.toFixed(1)+'%</b></div>';
+    }
+    if(emotionalCount > 0){
+      html += '<div class="report-card-row"><span>🧠 감정투자</span><b>'+emotionalCount+'회</b></div>';
+    }
+    if(fomoCount > 0){
+      html += '<div class="report-card-row"><span>🚀 포모매수</span><b>'+fomoCount+'회</b></div>';
+    }
+    if(herdCount > 0){
+      html += '<div class="report-card-row"><span>🐏 뇌동매매</span><b>'+herdCount+'회</b></div>';
+    }
+    html += '<div class="report-card-divider"></div>';
+
+    var bw = computeBestWorstAction(counts, avgBuyReturn, avgSellReturn, fomoCount, herdCount);
+    if(bw.best){
+      html += '<div class="report-card-insight"><span>가장 잘한 행동</span><span>→ '+bw.best+'</span></div>';
+    }
+    if(bw.worst){
+      html += '<div class="report-card-insight"><span>가장 아쉬운 행동</span><span>→ '+bw.worst+'</span></div>';
+    }
     html += '</div>';
 
     if((typeMode === 'all' || typeMode === 'buy') && hasBuyAmt){
