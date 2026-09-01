@@ -597,6 +597,28 @@
     color:var(--ink-soft);
     line-height:1.7;
   }
+  .status-table{
+    width:100%;
+    border-collapse:collapse;
+    font-size:12.5px;
+    margin-bottom:8px;
+  }
+  .status-table th{
+    text-align:left;
+    padding:8px 6px;
+    border-bottom:2px solid var(--line);
+    color:var(--ink-soft);
+    font-weight:700;
+    white-space:nowrap;
+  }
+  .status-table td{
+    padding:9px 6px;
+    border-bottom:1px solid var(--line);
+  }
+  .status-table select{
+    padding:9px 10px;
+    font-size:13px;
+  }
   .index-inputs{ margin-top:10px; }
   .index-inputs input{
     width:100%;
@@ -2250,6 +2272,27 @@ window.addEventListener('error', function(ev){
   var checklistTicker = null;
   var step3Revealed = false;
   var step3Checks = {};
+  var marketStatusMode = 'high52'; // 'high52' | 'prevclose'
+  var marketStatusCache = {};
+  var stockStatusAccount = '';
+  var stockStatusIndexFilter = '';
+  var MARKET_STATUS_INDICES = [
+    { key:'mkt_kospi', label:'코스피' },
+    { key:'mkt_kosdaq', label:'코스닥' },
+    { key:'mkt_dow', label:'다우존스' },
+    { key:'mkt_snp500', label:'S&P500' },
+    { key:'mkt_nasdaq', label:'나스닥' }
+  ];
+  var INDEX_CATEGORY_MAP = {
+    '코스피':'domestic', '코스닥':'domestic',
+    '다우존스':'overseas', 'S&P500':'overseas', '나스닥':'overseas'
+  };
+  function computeRiskTier(pctDrop, threshold){
+    if(!threshold || threshold <= 0) return { emoji:'⚪', label:'미설정', color:'var(--ink-faint)' };
+    if(pctDrop >= threshold) return { emoji:'🚨', label:'위험', color:'var(--brick)' };
+    if(pctDrop >= threshold * 0.7) return { emoji:'🟡', label:'경계', color:'var(--olive)' };
+    return { emoji:'🟢', label:'정상', color:'var(--pine)' };
+  }
 
 
   async function loadTickerRegistry(){
@@ -3141,171 +3184,114 @@ window.addEventListener('error', function(ev){
     html += '</ul>';
     html += '</div>';
 
-    html += '<p class="card-title" style="margin-top:20px;">1️⃣ 지수 확인</p>';
-    html += '<div class="chiprow" id="indexChips">';
-    Object.keys(INDEX_META).forEach(function(k){
-      html += '<button class="chip'+(selectedIndexKey===k?' selected':'')+'" data-index="'+k+'" type="button">'+INDEX_META[k].label+'</button>';
+    // ---- 1. 시장 현황 ----
+    html += '<p class="card-title" style="margin-top:20px;">📈 시장 현황</p>';
+    html += '<div class="radio-row" style="display:flex;gap:18px;margin-bottom:12px;">';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13.5px;"><input type="radio" name="marketStatusRadio" value="high52"'+(marketStatusMode==='high52'?' checked':'')+'> 최근고점(52주)</label>';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13.5px;"><input type="radio" name="marketStatusRadio" value="prevclose"'+(marketStatusMode==='prevclose'?' checked':'')+'> 전일종가</label>';
+    html += '</div>';
+    html += '<table class="status-table"><thead><tr><th>지수명</th><th>현재포인트</th><th>대비율</th><th>위험관리</th></tr></thead><tbody>';
+    MARKET_STATUS_INDICES.forEach(function(idx){
+      var d = marketStatusCache[idx.key];
+      var current = d ? d.price : null;
+      var compareVal = marketStatusMode === 'high52' ? (d ? d.fiftyTwoWeekHigh : null) : (d ? d.previousClose : null);
+      var pctDrop = (current != null && compareVal != null && compareVal > 0) ? ((compareVal - current) / compareVal * 100) : null;
+      var tier = pctDrop != null ? computeRiskTier(pctDrop, sellSettings.stopLossPct) : {emoji:'⚪',label:'-',color:'var(--ink-faint)'};
+      html += '<tr>';
+      html += '<td>'+idx.label+'</td>';
+      html += '<td>'+(current!=null ? current.toLocaleString(undefined,{maximumFractionDigits:2}) : '-')+'</td>';
+      html += '<td>'+(pctDrop!=null ? pctDrop.toFixed(1)+'%' : '-')+'</td>';
+      html += '<td style="color:'+tier.color+';font-weight:700;white-space:nowrap;">'+tier.emoji+' '+tier.label+'</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+    html += '<button class="cancelbtn" id="marketStatusFetchBtn" type="button" style="width:100%;margin-top:10px;">🔄 시장 현황 새로고침</button>';
+    html += '<p class="savehint">위험관리는 매도 원칙에 설정한 손절 기준('+sellSettings.stopLossPct+'%)을 기준으로 계산돼요.</p>';
+
+    // ---- 2. 종목 현황 ----
+    html += '<p class="card-title" style="margin-top:24px;">📊 종목 현황</p>';
+    html += '<div class="row2" style="margin-bottom:12px;">';
+    html += '<select id="stockStatusAccountSelect"><option value="">전체 계좌</option>';
+    accounts.forEach(function(acc){
+      html += '<option value="'+escapeHtml(acc.name)+'"'+(stockStatusAccount===acc.name?' selected':'')+'>'+escapeHtml(acc.name)+'</option>';
+    });
+    html += '</select>';
+    html += '<select id="stockStatusIndexSelect"><option value="">전체 지수</option>';
+    Object.keys(INDEX_CATEGORY_MAP).forEach(function(name){
+      html += '<option value="'+name+'"'+(stockStatusIndexFilter===name?' selected':'')+'>'+name+'</option>';
+    });
+    html += '</select>';
+    html += '</div>';
+
+    var holdingsForStatus = computeHoldings().filter(function(h){ return h.profitPct != null; });
+    if(stockStatusAccount){
+      holdingsForStatus = holdingsForStatus.filter(function(h){ return getTickerAccount(h.ticker) === stockStatusAccount; });
+    }
+    if(stockStatusIndexFilter){
+      var wantCat = INDEX_CATEGORY_MAP[stockStatusIndexFilter];
+      holdingsForStatus = holdingsForStatus.filter(function(h){ return h.category === wantCat; });
+    }
+
+    if(holdingsForStatus.length === 0){
+      html += '<p class="empty-inline">조건에 맞는 보유 종목이 없어요 (현재가가 입력된 종목만 표시돼요).</p>';
+    }else{
+      html += '<table class="status-table"><thead><tr><th>종목명</th><th>현재가</th><th>대비율(매수평균가)</th><th>위험관리</th></tr></thead><tbody>';
+      holdingsForStatus.forEach(function(h){
+        var lossPct = -h.profitPct;
+        var tier = computeRiskTier(lossPct, sellSettings.stopLossPct);
+        html += '<tr>';
+        html += '<td>'+escapeHtml(h.ticker)+'</td>';
+        html += '<td>'+formatWon(h.currentPrice)+'원</td>';
+        html += '<td>'+(lossPct>=0 ? lossPct.toFixed(1)+'%' : '이익 '+Math.abs(lossPct).toFixed(1)+'%')+'</td>';
+        html += '<td style="color:'+tier.color+';font-weight:700;white-space:nowrap;">'+tier.emoji+' '+tier.label+'</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+    }
+
+    // ---- 3. 투자논리 점검 (기존 체크리스트 유지) ----
+    html += '<p class="card-title" style="margin-top:24px;">🔄 투자논리 점검</p>';
+    html += '<div class="checklist-list">';
+    checklistItems.forEach(function(item){
+      var checked = !!step3Checks[item.id];
+      html += '<label class="checklist-item">';
+      html += '<input type="checkbox" class="checklistCheckbox" data-id="'+item.id+'"'+(checked?' checked':'')+'>';
+      html += '<span>'+escapeHtml(item.text)+(item.urgent?' <span class="urgent-badge">🚨 긴급</span>':'')+'</span>';
+      html += '</label>';
     });
     html += '</div>';
 
-    var step1Alert = false;
-    if(selectedIndexKey){
-      var idata = indexData[selectedIndexKey] || {};
-      html += '<div class="index-inputs">';
-      html += '<div class="symbol-row">';
-      html += '<input type="text" inputmode="decimal" id="indexCurrentInput" placeholder="현재가" value="'+(idata.current!=null?idata.current:'')+'">';
-      html += '<button class="fetchbtn" id="indexFetchBtn" type="button">🔄 조회</button>';
-      html += '</div>';
-      html += '<p class="fetch-status" id="indexFetchStatus"></p>';
-      html += '<input type="text" inputmode="decimal" id="indexHighInput" placeholder="전일 종가" value="'+(idata.high!=null?idata.high:'')+'" style="margin-top:6px;">';
-      html += '<button class="cancelbtn" id="saveIndexBtn" type="button" style="width:100%;margin-top:8px;">저장</button>';
-
-      if(idata.high > 0 && idata.current > 0){
-        var declinePct = (idata.high - idata.current) / idata.high * 100;
-        step1Alert = declinePct >= sellSettings.stopLossPct;
-        html += '<div class="index-result">';
-        html += '<span class="index-decline" style="color:'+(declinePct>=0?'var(--blue)':'var(--brick)')+';">전일 종가 대비 '+Math.abs(declinePct).toFixed(1)+'% '+(declinePct>=0?'하락':'상승')+'</span>';
-        html += '<span class="index-icon">'+(step1Alert ? '🚨' : '🌿')+'</span>';
-        html += '</div>';
-        if(step1Alert){
-          html += '<p class="alert-note">매도 원칙('+sellSettings.stopLossPct+'%) 이상 하락 — 2단계를 확인해보세요.</p>';
-        }
-      }
-      html += '</div>';
-    }
-
-    var holdings = computeHoldings();
-    html += '<p class="card-title" style="margin-top:20px;">2️⃣ 손절 종목 확인</p>';
-    if(!step1Alert){
-      html += '<p class="empty-inline">1단계에서 지수 하락 경보(🚨)가 떠야 활성화돼요.</p>';
-    }else if(holdings.length === 0){
-      html += '<p class="empty-inline">보유 중인 종목이 없어요.</p>';
-    }else{
-      html += '<select class="step2select" id="checklistTickerSelect">';
-      html += '<option value="">종목 선택</option>';
-      holdings.forEach(function(h){
-        var sel = (checklistTicker === h.ticker) ? ' selected' : '';
-        html += '<option value="'+escapeHtml(h.ticker)+'"'+sel+'>'+escapeHtml(h.ticker)+'</option>';
-      });
-      html += '</select>';
-
-      if(checklistTicker){
-        var ch = holdings.find(function(x){ return x.ticker === checklistTicker; });
-        if(ch){
-          var stopLossAmt = ch.marketValue * (1 - sellSettings.stopLossPct/100);
-          html += '<div class="holding-item" style="margin-top:10px;">';
-          html += '<div class="holding-sub">현재 평가금 <b>'+formatWon(ch.marketValue)+'원</b> → 손절가 <b style="color:var(--blue);">'+formatWon(stopLossAmt)+'원</b></div>';
-          html += '</div>';
-          html += '<button class="savebtn" id="step2NextBtn" type="button" style="width:100%;margin-top:10px;">다음</button>';
-        }
-      }
-    }
-
-    if(step1Alert && checklistTicker && step3Revealed){
-      html += '<p class="card-title" style="margin-top:20px;">3️⃣ 매도 체크리스트</p>';
-      html += '<div class="checklist-list">';
-      checklistItems.forEach(function(item){
-        var checked = !!step3Checks[item.id];
-        html += '<label class="checklist-item">';
-        html += '<input type="checkbox" class="checklistCheckbox" data-id="'+item.id+'"'+(checked?' checked':'')+'>';
-        html += '<span>'+escapeHtml(item.text)+(item.urgent?' <span class="urgent-badge">🚨 긴급</span>':'')+'</span>';
-        html += '</label>';
-      });
-      html += '</div>';
-
-      var checkedCount = checklistItems.reduce(function(s,item){ return s + (step3Checks[item.id] ? 1 : 0); }, 0);
-      var pct = checklistItems.length > 0 ? (checkedCount / checklistItems.length) * 100 : 0;
-      var urgentTriggered = checklistItems.some(function(item){ return item.urgent && step3Checks[item.id]; });
-      var verdict = urgentTriggered || (pct >= sellChecklistThresholdPct);
-      var pctText = checkedCount+' / '+checklistItems.length+' 체크 ('+pct.toFixed(0)+'%)';
-      if(urgentTriggered) pctText += ' · 🚨 긴급 항목 체크됨';
-      html += '<div class="verdict-box" id="verdictBox">';
-      html += '<p class="verdict-pct">'+pctText+'</p>';
-      html += '<p class="verdict-label" style="color:'+(verdict?'var(--brick)':'var(--pine)')+';">'+(verdict?'🚨 매도 권장':'🌿 매도 불필요')+'</p>';
-      html += '</div>';
-    }
+    var checkedCount = checklistItems.reduce(function(s,item){ return s + (step3Checks[item.id] ? 1 : 0); }, 0);
+    var pct = checklistItems.length > 0 ? (checkedCount / checklistItems.length) * 100 : 0;
+    var urgentTriggered = checklistItems.some(function(item){ return item.urgent && step3Checks[item.id]; });
+    var verdict = urgentTriggered || (pct >= sellChecklistThresholdPct);
+    var pctText = checkedCount+' / '+checklistItems.length+' 체크 ('+pct.toFixed(0)+'%)';
+    if(urgentTriggered) pctText += ' · 🚨 긴급 항목 체크됨';
+    html += '<div class="verdict-box" id="verdictBox">';
+    html += '<p class="verdict-pct">'+pctText+'</p>';
+    html += '<p class="verdict-label" style="color:'+(verdict?'var(--brick)':'var(--pine)')+';">'+(verdict?'🚨 매도 권장':'🌿 매도 불필요')+'</p>';
+    html += '</div>';
 
     body.innerHTML = html;
 
-    document.querySelectorAll('#indexChips .chip').forEach(function(c){
-      c.addEventListener('click', function(){
-        selectedIndexKey = c.getAttribute('data-index');
+    document.querySelectorAll('input[name="marketStatusRadio"]').forEach(function(r){
+      r.addEventListener('change', function(){
+        marketStatusMode = r.value;
         renderSellChecklistScreen();
-        autoFetchIndexQuote();
       });
     });
-
-    var currentInput = document.getElementById('indexCurrentInput');
-    var highInput = document.getElementById('indexHighInput');
-    var fetchBtn = document.getElementById('indexFetchBtn');
-    var saveIdxBtn = document.getElementById('saveIndexBtn');
-    if(saveIdxBtn){
-      saveIdxBtn.addEventListener('click', async function(){
-        var cur = parseFloat(currentInput.value.replace(/,/g,''));
-        var high = parseFloat(highInput.value.replace(/,/g,''));
-        indexData[selectedIndexKey] = {
-          current: cur > 0 ? cur : null,
-          high: high > 0 ? high : null
-        };
-        await saveIndexData();
-        renderSellChecklistScreen();
-      });
-    }
-    async function fetchIndexQuoteViaServer(indexKey){
-      var res = await fetch('/api/naver-price?index=' + encodeURIComponent(indexKey));
-      var rawText = await res.text();
-      var data;
-      try{
-        data = JSON.parse(rawText);
-      }catch(e){
-        throw new Error('서버 응답 오류 (HTTP '+res.status+')');
-      }
-      if(!res.ok || data.error){
-        throw new Error(data.error || ('서버 오류 (HTTP '+res.status+')'));
-      }
-      return data;
-    }
-    async function autoFetchIndexQuote(){
-      var statusEl = document.getElementById('indexFetchStatus');
-      var curInp = document.getElementById('indexCurrentInput');
-      var highInp = document.getElementById('indexHighInput');
-      if(!statusEl || !curInp || !highInp || !selectedIndexKey) return;
-      statusEl.style.color = 'var(--ink-soft)';
-      statusEl.textContent = '조회 중…';
-      try{
-        var quote = await fetchIndexQuoteViaServer(selectedIndexKey);
-        curInp.value = quote.price;
-        if(quote.previousClose != null){
-          highInp.value = quote.previousClose;
-        }
-        statusEl.style.color = 'var(--pine)';
-        statusEl.textContent = '현재가 · 전일 종가 자동으로 불러왔어요';
-        setTimeout(function(){ if(statusEl) statusEl.textContent = ''; }, 2000);
-      }catch(err){
-        statusEl.style.color = 'var(--brick)';
-        statusEl.textContent = '자동 조회 실패: 직접 입력해주세요. ('+(err && err.message ? err.message : err)+')';
-      }
-    }
-    if(fetchBtn){
-      fetchBtn.addEventListener('click', autoFetchIndexQuote);
-    }
-
-    var tickerSelect = document.getElementById('checklistTickerSelect');
-    if(tickerSelect){
-      tickerSelect.addEventListener('change', function(){
-        checklistTicker = tickerSelect.value || null;
-        step3Revealed = false;
-        step3Checks = {};
-        renderSellChecklistScreen();
-      });
-    }
-    var step2NextBtn = document.getElementById('step2NextBtn');
-    if(step2NextBtn){
-      step2NextBtn.addEventListener('click', function(){
-        step3Revealed = true;
-        renderSellChecklistScreen();
-      });
-    }
+    document.getElementById('marketStatusFetchBtn').addEventListener('click', async function(){
+      await fetchMarketStatusData();
+      renderSellChecklistScreen();
+    });
+    document.getElementById('stockStatusAccountSelect').addEventListener('change', function(){
+      stockStatusAccount = this.value;
+      renderSellChecklistScreen();
+    });
+    document.getElementById('stockStatusIndexSelect').addEventListener('change', function(){
+      stockStatusIndexFilter = this.value;
+      renderSellChecklistScreen();
+    });
     document.querySelectorAll('.checklistCheckbox').forEach(function(cb){
       cb.addEventListener('change', function(){
         var id = cb.getAttribute('data-id');
@@ -3313,6 +3299,25 @@ window.addEventListener('error', function(ev){
         updateVerdictBox();
       });
     });
+
+    if(!marketStatusFetchAttempted){
+      marketStatusFetchAttempted = true;
+      fetchMarketStatusData().then(function(){ renderSellChecklistScreen(); });
+    }
+  }
+
+  var marketStatusFetchAttempted = false;
+  async function fetchMarketStatusData(){
+    for(var i=0; i<MARKET_STATUS_INDICES.length; i++){
+      var idx = MARKET_STATUS_INDICES[i];
+      try{
+        var res = await fetch('/api/naver-price?index=' + idx.key);
+        var data = await res.json();
+        if(res.ok && !data.error){
+          marketStatusCache[idx.key] = data;
+        }
+      }catch(e){}
+    }
   }
 
   function renderPortfolioSectionHTML(holdings){
