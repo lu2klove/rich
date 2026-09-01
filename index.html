@@ -2307,6 +2307,67 @@ window.addEventListener('error', function(ev){
   var checklistTicker = null;
   var step3Revealed = false;
   var step3Checks = {};
+
+  // ---------- 투자논리 진단 시스템 ----------
+  var THESIS_DAMAGE_ITEMS = [
+    { id:'foreign', text:'외국인 수급 감소' },
+    { id:'inst', text:'기관 수급 감소' },
+    { id:'rates', text:'금리 환경이 불리하게 변했다' },
+    { id:'competitiveness', text:'기업 경쟁력이 훼손됐다' },
+    { id:'cycle', text:'산업 사이클이 불리하게 변했다' },
+    { id:'assumption', text:'내 투자 가정이 틀렸다' }
+  ];
+  var SELL_REASON_OPTIONS = [
+    '투자논리 훼손','시장 위험','종목 위험','수익실현','포트폴리오 조정',
+    '현금 확보','다른 종목으로 교체','손실 확대 우려','단순 답답함','불안해서','조급해서','기타'
+  ];
+  var EMOTIONAL_SELL_REASONS = ['단순 답답함','불안해서','조급해서'];
+  var investLogicTicker = null;
+  var investLogicState = {}; // { [ticker]: { checksA:{}, q1:'', q2:'', sellReason:'' } }
+  function getInvestLogicState(ticker){
+    if(!investLogicState[ticker]){
+      investLogicState[ticker] = { checksA:{}, q1:'', q2:'', sellReason:'' };
+    }
+    return investLogicState[ticker];
+  }
+  function computeHoldConviction(q1, q2){
+    if(!q1 || !q2) return null;
+    if(q1 === 'no' || q2 === 'no') return { level:'낮음', emoji:'🔴', color:'var(--brick)' };
+    if(q1 === 'yes' && q2 === 'yes') return { level:'높음', emoji:'🟢', color:'var(--pine)' };
+    return { level:'보통', emoji:'🟡', color:'var(--olive)' };
+  }
+  function getMarketRiskForTicker(ticker){
+    var indexKey = getTickerIndex(ticker);
+    if(!indexKey) return null;
+    var mktKey = 'mkt_' + indexKey;
+    var d = marketStatusCache[mktKey];
+    if(!d) return null;
+    var current = d.price;
+    var compareVal = marketStatusMode === 'high52' ? d.fiftyTwoWeekHigh : d.previousClose;
+    if(current == null || compareVal == null || compareVal <= 0) return null;
+    var pctDrop = (compareVal - current) / compareVal * 100;
+    return computeRiskTier(pctDrop, sellSettings.stopLossPct);
+  }
+  function computeFinalVerdict(thesisCount, holdConviction, sellReason){
+    if(sellReason && EMOTIONAL_SELL_REASONS.indexOf(sellReason) !== -1){
+      return {
+        emoji:'🚫', label:'매도 금지', color:'var(--ink)',
+        reason:'현재 선택한 사유는 투자논리의 변화가 아니라 감정에 기반한 매도 사유예요. 매도하지 않고 24시간 후 다시 검토해보길 권장해요.'
+      };
+    }
+    var holdLevel = holdConviction ? holdConviction.level : null;
+    if(thesisCount >= 4){
+      return { emoji:'🔴', label:'매도 검토', color:'var(--brick)', reason:'투자논리가 크게 훼손됐어요 ('+thesisCount+'/6). 처음 투자했던 근거가 여전히 유효한지 다시 확인해보세요.' };
+    }
+    if(thesisCount >= 2 || holdLevel === '낮음'){
+      return { emoji:'🟡', label:'일부 매도 검토', color:'var(--olive)', reason:'투자논리 일부가 흔들리고 있어요. 비중을 줄이는 것도 고려해볼 수 있어요.' };
+    }
+    if(thesisCount === 0 && holdLevel === '높음'){
+      return { emoji:'🟢', label:'보유', color:'var(--pine)', reason:'투자논리 훼손이 없고 보유 확신도 높아요. 시장·종목 위험은 참고만 하고 원칙대로 대응하세요.' };
+    }
+    return { emoji:'🟡', label:'매도 검토', color:'var(--olive)', reason:'투자논리에 뚜렷한 훼손은 없지만, 보유 확신이 흔들리고 있어요.' };
+  }
+
   var marketStatusMode = 'high52'; // 'high52' | 'prevclose'
   var marketStatusCache = {};
   var stockStatusAccount = '';
@@ -2814,6 +2875,20 @@ window.addEventListener('error', function(ev){
     return { best: best, worst: worst };
   }
 
+  function getFirstBuyDate(ticker){
+    var buys = entries.filter(function(e){ return e.type === 'buy' && e.ticker === ticker; });
+    if(buys.length === 0) return null;
+    var dates = buys.map(function(e){ return e.date; }).sort();
+    return dates[0];
+  }
+  function computeHoldingYears(dateStr){
+    if(!dateStr) return null;
+    var start = new Date(dateStr + 'T00:00:00');
+    var now = new Date();
+    var diffMs = now - start;
+    return diffMs / (1000*60*60*24*365.25);
+  }
+
   function renderProfitRankingScreen(){
     var holdings = computeHoldings();
     var ranking = computeProfitRanking(holdings);
@@ -2864,6 +2939,31 @@ window.addEventListener('error', function(ev){
         html += '<div class="holding-item">';
         html += '<div class="holding-top"><span class="holding-name">'+(i+1)+'. '+escapeHtml(w.account)+'</span><span class="holding-amt" style="color:var(--blue);">'+formatWon(w.profit)+'원</span></div>';
         html += '<div class="holding-sub" style="color:var(--blue);font-weight:600;">수익률 '+w.profitPct.toFixed(1)+'%</div>';
+        html += '</div>';
+      });
+    }
+
+    html += '<p class="card-title" style="margin-top:20px;">🕰️ 장기보유 종목</p>';
+    var longTermHoldings = holdings.map(function(h){
+      var firstBuy = getFirstBuyDate(h.ticker);
+      var years = computeHoldingYears(firstBuy);
+      return { ticker:h.ticker, years:years, firstBuy:firstBuy, profit:h.profit, profitPct:h.profitPct };
+    }).filter(function(h){ return h.years != null && h.years >= 1; })
+      .sort(function(a,b){ return b.years - a.years; });
+
+    if(longTermHoldings.length === 0){
+      html += '<p class="empty-inline">1년 이상 보유 중인 종목이 없어요.</p>';
+    }else{
+      longTermHoldings.forEach(function(h){
+        var badge = h.years >= 5 ? '5년+' : (h.years >= 3 ? '3년+' : '1년+');
+        var badgeColor = h.years >= 5 ? 'var(--brick)' : (h.years >= 3 ? 'var(--olive)' : 'var(--blue)');
+        html += '<div class="holding-item">';
+        html += '<div class="holding-top"><span class="holding-name">'+escapeHtml(h.ticker)+' <span style="font-size:11px;padding:2px 8px;border-radius:10px;background:'+badgeColor+';color:white;font-weight:700;">'+badge+'</span></span><span class="holding-amt">'+h.years.toFixed(1)+'년</span></div>';
+        if(h.profit != null){
+          var ltpc = h.profit >= 0 ? 'var(--brick)' : 'var(--blue)';
+          html += '<div class="holding-sub" style="color:'+ltpc+';font-weight:600;">'+(h.profit>=0?'+':'')+formatWon(h.profit)+'원 ('+(h.profitPct>=0?'+':'')+h.profitPct.toFixed(1)+'%)</div>';
+        }
+        html += '<div class="holding-sub" style="color:var(--ink-faint);">최초 매수일 '+niceDate(h.firstBuy)+'</div>';
         html += '</div>';
       });
     }
@@ -3222,7 +3322,7 @@ window.addEventListener('error', function(ev){
     if(marketStatusLastError){
       html += '<p class="toast" style="color:var(--brick);margin-top:6px;">일부 조회 실패: '+escapeHtml(marketStatusLastError)+'</p>';
     }
-    html += '<p class="savehint">위험관리는 매도 원칙에 설정한 손절 기준('+sellSettings.stopLossPct+'%)을 기준으로 계산돼요.</p>';
+    html += '<p class="savehint">시장 하락률은 선택한 기준(최근고점/전일종가)을 기준으로 계산합니다. 시장 위험은 매도 여부를 결정하기 위한 참고지표이며, 자동 매도 신호가 아닙니다.</p>';
 
     // ---- 2. 종목 현황 ----
     html += '<div id="stockStatusSection"><p class="card-title" style="margin-top:24px;">📊 종목 현황</p>';
@@ -3257,7 +3357,7 @@ window.addEventListener('error', function(ev){
         var tier = computeRiskTier(lossPct, sellSettings.stopLossPct);
         var idxMeta = TICKER_INDEX_META[getTickerIndex(h.ticker)];
         var isStockClickable = tier.label === '위험' || tier.label === '경계';
-        html += '<tr'+(isStockClickable ? ' class="stock-row-clickable" style="cursor:pointer;"' : '')+'>';
+        html += '<tr'+(isStockClickable ? ' class="stock-row-clickable" data-ticker="'+escapeHtml(h.ticker)+'" style="cursor:pointer;"' : '')+'>';
         html += '<td>'+(idxMeta?idxMeta.icon+' ':'')+escapeHtml(h.ticker)+(isStockClickable?' 👆':'')+'</td>';
         html += '<td>'+formatWon(h.currentPrice)+'원</td>';
         html += '<td><span style="color:'+(h.profitPct>=0?'var(--brick)':'var(--blue)')+';font-weight:600;">'+(h.profitPct>=0?'+':'-')+Math.abs(h.profitPct).toFixed(1)+'%</span></td>';
@@ -3270,27 +3370,85 @@ window.addEventListener('error', function(ev){
     // ---- 3. 투자논리 점검 (기존 체크리스트 유지) ----
     html += '</div>';
     html += '<div id="investLogicSection"><p class="card-title" style="margin-top:24px;">🔄 투자논리 점검</p>';
-    html += '<div class="checklist-list">';
-    checklistItems.forEach(function(item){
-      var checked = !!step3Checks[item.id];
-      html += '<label class="checklist-item">';
-      html += '<input type="checkbox" class="checklistCheckbox" data-id="'+item.id+'"'+(checked?' checked':'')+'>';
-      html += '<span>'+escapeHtml(item.text)+(item.urgent?' <span class="urgent-badge">🚨 긴급</span>':'')+'</span>';
-      html += '</label>';
-    });
-    html += '</div>';
 
-    var checkedCount = checklistItems.reduce(function(s,item){ return s + (step3Checks[item.id] ? 1 : 0); }, 0);
-    var pct = checklistItems.length > 0 ? (checkedCount / checklistItems.length) * 100 : 0;
-    var urgentTriggered = checklistItems.some(function(item){ return item.urgent && step3Checks[item.id]; });
-    var verdict = urgentTriggered || (pct >= sellChecklistThresholdPct);
-    var pctText = checkedCount+' / '+checklistItems.length+' 체크 ('+pct.toFixed(0)+'%)';
-    if(urgentTriggered) pctText += ' · 🚨 긴급 항목 체크됨';
-    html += '<div class="verdict-box" id="verdictBox">';
-    html += '<p class="verdict-pct">'+pctText+'</p>';
-    html += '<p class="verdict-label" style="color:'+(verdict?'var(--brick)':'var(--pine)')+';">'+(verdict?'🚨 매도 권장':'🌿 매도 불필요')+'</p>';
-    html += '</div>';
-    html += '</div>';
+    var allHoldingsForLogic = computeHoldings().filter(function(h){ return h.profitPct != null; });
+    if(!investLogicTicker && allHoldingsForLogic.length > 0){
+      investLogicTicker = allHoldingsForLogic[0].ticker;
+    }
+
+    if(allHoldingsForLogic.length === 0){
+      html += '<p class="empty-inline">현재가가 입력된 보유 종목이 있어야 진단할 수 있어요.</p>';
+      html += '</div>';
+    }else{
+      html += '<div class="field"><span class="field-label">진단할 종목</span><select id="investLogicTickerSelect" class="select-pill">';
+      allHoldingsForLogic.forEach(function(h){
+        html += '<option value="'+escapeHtml(h.ticker)+'"'+(investLogicTicker===h.ticker?' selected':'')+'>'+escapeHtml(h.ticker)+'</option>';
+      });
+      html += '</select></div>';
+
+      var ilState = getInvestLogicState(investLogicTicker);
+      var focusedHolding = allHoldingsForLogic.find(function(h){ return h.ticker === investLogicTicker; });
+
+      html += '<p class="field-label field-label-strong" style="margin-top:18px;color:var(--brick);">🔴 A. 투자논리 훼손 여부</p>';
+      html += '<div class="checklist-list">';
+      THESIS_DAMAGE_ITEMS.forEach(function(item){
+        var checked = !!ilState.checksA[item.id];
+        html += '<label class="checklist-item">';
+        html += '<input type="checkbox" class="thesisCheckbox" data-id="'+item.id+'"'+(checked?' checked':'')+'>';
+        html += '<span>'+escapeHtml(item.text)+'</span>';
+        html += '</label>';
+      });
+      html += '</div>';
+      var thesisCount = THESIS_DAMAGE_ITEMS.reduce(function(s,item){ return s + (ilState.checksA[item.id] ? 1 : 0); }, 0);
+      html += '<p class="savehint" style="font-weight:700;color:var(--brick);">🔴 투자논리 훼손 '+thesisCount+' / '+THESIS_DAMAGE_ITEMS.length+'</p>';
+
+      html += '<p class="field-label field-label-strong" style="margin-top:20px;">📌 B. 보유 의사 점검</p>';
+      html += '<div class="field"><span class="field-label">5년 뒤에도 이 회사를 보유하고 싶은가?</span><div class="chiprow" id="holdQ1Chips">';
+      [['yes','🟢 YES'],['unsure','🟡 모르겠다'],['no','🔴 NO']].forEach(function(o){
+        html += '<button class="chip'+(ilState.q1===o[0]?' selected':'')+'" data-val="'+o[0]+'" type="button">'+o[1]+'</button>';
+      });
+      html += '</div></div>';
+      html += '<div class="field"><span class="field-label">지금이 아니라 3년 뒤를 보고도 이 회사를 사고 싶은가?</span><div class="chiprow" id="holdQ2Chips">';
+      [['yes','🟢 YES'],['unsure','🟡 모르겠다'],['no','🔴 NO']].forEach(function(o){
+        html += '<button class="chip'+(ilState.q2===o[0]?' selected':'')+'" data-val="'+o[0]+'" type="button">'+o[1]+'</button>';
+      });
+      html += '</div></div>';
+
+      html += '<p class="field-label field-label-strong" style="margin-top:20px;">😵 현재 매도하고 싶은 가장 큰 이유</p>';
+      html += '<select id="sellReasonSelect" class="select-pill" style="width:100%;">';
+      html += '<option value="">선택 안 함</option>';
+      SELL_REASON_OPTIONS.forEach(function(r){
+        html += '<option value="'+r+'"'+(ilState.sellReason===r?' selected':'')+'>'+r+'</option>';
+      });
+      html += '</select>';
+      if(ilState.sellReason && EMOTIONAL_SELL_REASONS.indexOf(ilState.sellReason) !== -1){
+        html += '<div class="rule-card" style="margin-top:10px;background:var(--brick-soft);">';
+        html += '<p class="rule-main" style="color:var(--brick);">⚠️ 감정에 의한 매도 가능성이 있습니다.</p>';
+        html += '<p style="font-size:12.5px;color:var(--ink-soft);margin:6px 0 0;">현재 선택한 사유는 투자논리의 변화가 아니라 감정에 기반한 매도 사유입니다.</p>';
+        html += '<p style="font-size:12.5px;color:var(--ink-soft);margin:4px 0 0;font-weight:700;">매도하지 않고 24시간 후 재검토를 권장해요.</p>';
+        html += '</div>';
+      }
+
+      var holdConviction = computeHoldConviction(ilState.q1, ilState.q2);
+      var marketRisk = getMarketRiskForTicker(investLogicTicker);
+      var stockRisk = focusedHolding ? computeRiskTier(-focusedHolding.profitPct, sellSettings.stopLossPct) : null;
+      var finalVerdict = computeFinalVerdict(thesisCount, holdConviction, ilState.sellReason);
+
+      html += '<div class="verdict-box" id="verdictBox" style="margin-top:20px;">';
+      html += '<p class="verdict-pct" style="font-weight:700;">🧠 투자논리 진단 — '+escapeHtml(investLogicTicker)+'</p>';
+      html += '<div style="text-align:left;font-size:13.5px;margin:12px 0;line-height:2.1;">';
+      html += '<div style="display:flex;justify-content:space-between;"><span>투자논리 훼손</span><b>'+thesisCount+' / '+THESIS_DAMAGE_ITEMS.length+'</b></div>';
+      html += '<div style="display:flex;justify-content:space-between;"><span>보유 확신</span><b style="color:'+(holdConviction?holdConviction.color:'var(--ink-faint)')+';">'+(holdConviction?holdConviction.emoji+' '+holdConviction.level:'미응답')+'</b></div>';
+      html += '<div style="display:flex;justify-content:space-between;"><span>시장 위험</span><b style="color:'+(marketRisk?marketRisk.color:'var(--ink-faint)')+';">'+(marketRisk?marketRisk.emoji+' '+marketRisk.label:'지수 미지정/미조회')+'</b></div>';
+      html += '<div style="display:flex;justify-content:space-between;"><span>종목 위험</span><b style="color:'+(stockRisk?stockRisk.color:'var(--ink-faint)')+';">'+(stockRisk?stockRisk.emoji+' '+stockRisk.label:'-')+'</b></div>';
+      html += '</div>';
+      html += '<div style="border-top:1px solid var(--line);margin:8px 0 14px;"></div>';
+      html += '<p style="font-size:12px;color:var(--ink-faint);margin-bottom:4px;">종합 판단</p>';
+      html += '<p class="verdict-label" style="color:'+finalVerdict.color+';">'+finalVerdict.emoji+' '+finalVerdict.label+'</p>';
+      html += '<p style="font-size:12.5px;color:var(--ink-soft);margin-top:8px;">'+escapeHtml(finalVerdict.reason)+'</p>';
+      html += '</div>';
+      html += '</div>';
+    }
 
     body.innerHTML = html;
 
@@ -3325,12 +3483,16 @@ window.addEventListener('error', function(ev){
     });
     document.querySelectorAll('.stock-row-clickable').forEach(function(row){
       row.addEventListener('click', function(){
-        var target = document.getElementById('investLogicSection');
-        if(target){
-          target.scrollIntoView({ behavior:'smooth', block:'start' });
-          target.classList.add('highlight-pulse');
-          setTimeout(function(){ target.classList.remove('highlight-pulse'); }, 2000);
-        }
+        investLogicTicker = row.getAttribute('data-ticker');
+        renderSellChecklistScreen();
+        setTimeout(function(){
+          var target = document.getElementById('investLogicSection');
+          if(target){
+            target.scrollIntoView({ behavior:'smooth', block:'start' });
+            target.classList.add('highlight-pulse');
+            setTimeout(function(){ target.classList.remove('highlight-pulse'); }, 2000);
+          }
+        }, 50);
       });
     });
     document.getElementById('stockStatusAccountSelect').addEventListener('change', function(){
@@ -3341,13 +3503,45 @@ window.addEventListener('error', function(ev){
       stockStatusIndexFilter = this.value;
       renderSellChecklistScreen();
     });
-    document.querySelectorAll('.checklistCheckbox').forEach(function(cb){
+    var ilTickerSelect = document.getElementById('investLogicTickerSelect');
+    if(ilTickerSelect){
+      ilTickerSelect.addEventListener('change', function(){
+        investLogicTicker = this.value;
+        renderSellChecklistScreen();
+      });
+    }
+    document.querySelectorAll('.thesisCheckbox').forEach(function(cb){
       cb.addEventListener('change', function(){
         var id = cb.getAttribute('data-id');
-        step3Checks[id] = cb.checked;
-        updateVerdictBox();
+        getInvestLogicState(investLogicTicker).checksA[id] = cb.checked;
+        renderSellChecklistScreen();
       });
     });
+    var holdQ1El = document.getElementById('holdQ1Chips');
+    if(holdQ1El){
+      holdQ1El.querySelectorAll('.chip').forEach(function(c){
+        c.addEventListener('click', function(){
+          getInvestLogicState(investLogicTicker).q1 = c.getAttribute('data-val');
+          renderSellChecklistScreen();
+        });
+      });
+    }
+    var holdQ2El = document.getElementById('holdQ2Chips');
+    if(holdQ2El){
+      holdQ2El.querySelectorAll('.chip').forEach(function(c){
+        c.addEventListener('click', function(){
+          getInvestLogicState(investLogicTicker).q2 = c.getAttribute('data-val');
+          renderSellChecklistScreen();
+        });
+      });
+    }
+    var sellReasonEl = document.getElementById('sellReasonSelect');
+    if(sellReasonEl){
+      sellReasonEl.addEventListener('change', function(){
+        getInvestLogicState(investLogicTicker).sellReason = this.value;
+        renderSellChecklistScreen();
+      });
+    }
 
     if(!marketStatusFetchAttempted){
       marketStatusFetchAttempted = true;
