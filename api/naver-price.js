@@ -134,10 +134,10 @@ export default async function handler(request) {
 // 나스닥/S&P500: no confirmed Naver endpoint, so proxied through Yahoo Finance
 // here (server-side), which avoids the browser CORS issue just as effectively.
 async function handleIndexRequest(indexKey) {
-  const NAVER_DOMESTIC = { kospi: 'KOSPI', kosdaq: 'KOSDAQ' };
+  const NAVER_DOMESTIC = { kospi: 'KOSPI', kosdaq: 'KOSDAQ', vkospi: 'VKOSPI' };
   const YAHOO_WORLD = {
     nasdaq: '^IXIC', snp500: '^GSPC', wti: 'CL=F', us10y: '^TNX', us30y: '^TYX',
-    fx: 'KRW=X', sox: '^SOX', dow: '^DJI', btc: 'BTC-USD', vix: '^VIX',
+    fx: 'KRW=X', sox: '^SOX', dow: '^DJI', btc: 'BTC-USD', vix: '^VIX', gold: 'GC=F',
     mkt_kospi: '^KS11', mkt_kosdaq: '^KQ11', mkt_dow: '^DJI', mkt_snp500: '^GSPC', mkt_nasdaq: '^IXIC'
   };
 
