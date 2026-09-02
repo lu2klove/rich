@@ -882,6 +882,12 @@
   body.text-scale-90 .settings-sheet{ zoom:1.1111; }
   body.text-scale-115 .settings-sheet{ zoom:0.8696; }
   body.text-scale-130 .settings-sheet{ zoom:0.7692; }
+  body.text-scale-90 #fabSettingsBtn{ zoom:1.1111; }
+  body.text-scale-115 #fabSettingsBtn{ zoom:0.8696; }
+  body.text-scale-130 #fabSettingsBtn{ zoom:0.7692; }
+  body.text-scale-90 .asset-screen{ zoom:1.1111; }
+  body.text-scale-115 .asset-screen{ zoom:0.8696; }
+  body.text-scale-130 .asset-screen{ zoom:0.7692; }
 
   .lockscreen{
     position:fixed;
@@ -936,7 +942,7 @@
     letter-spacing:.16em;
     color:var(--ink-faint);
     text-transform:uppercase;
-    margin:0 0 6px;
+    margin:0 0 16px;
   }
   h1{
     font-family:'Noto Serif KR',serif;
@@ -962,6 +968,8 @@
     font-size:13.5px;
     color:var(--ink-soft);
     margin:0 0 20px;
+    padding-bottom:18px;
+    border-bottom:1px solid var(--line);
   }
 
   /* ---------- Card shell ---------- */
@@ -1631,7 +1639,7 @@
   <div class="header-row">
     <h1>📝 투자일지</h1>
     <div class="header-btns">
-      <button class="assetbtn" id="sellChecklistBtn" type="button">📋 매도 체크리스트</button>
+      <button class="assetbtn" id="sellChecklistBtn" type="button">📋 매도 의사결정</button>
       <button class="assetbtn" id="reviewBtn" type="button">🔍 복기</button>
       <button class="assetbtn" id="assetMgmtBtn" type="button">📊 자산관리</button>
     </div>
@@ -1791,7 +1799,7 @@
 <div class="asset-screen" id="sellChecklistScreen">
   <div class="asset-header">
     <button class="asset-back" id="sellChecklistBackBtn" type="button">‹ 뒤로</button>
-    <span class="asset-title">📋 매도 체크리스트</span>
+    <span class="asset-title">📋 매도 의사결정</span>
     <button class="asset-back" id="manageChecklistBtn" type="button" aria-label="체크리스트 관리">✏️</button>
   </div>
   <div class="asset-body" id="sellChecklistBody"></div>
@@ -3211,7 +3219,7 @@ window.addEventListener('error', function(ev){
     html += '<div class="field"><span class="field-label field-label-strong">💱 환율(USD/KRW) 위험지수(원)</span><input type="number" id="ri_fx" value="'+(riskThresholds.fx||'')+'"></div>';
     html += '<button class="savebtn" id="ri_saveBtn" type="button" style="width:100%;">저장</button>';
     html += '<p class="toast" id="ri_toast"></p>';
-    html += '<p class="savehint">여기서 설정한 위험지수는 매도 체크리스트의 "시장 현황"에서 실제 시세와 비교돼요.</p>';
+    html += '<p class="savehint">여기서 설정한 위험지수는 매도 의사결정의 "시장 현황"에서 실제 시세와 비교돼요.</p>';
 
     body.innerHTML = html;
 
@@ -3282,7 +3290,7 @@ window.addEventListener('error', function(ev){
     var html = '';
 
     html += '<p class="card-title no-divider" style="margin-top:0;color:var(--brick);">🔴 A. 투자논리 훼손 항목 관리</p>';
-    html += '<p class="savehint" style="margin-top:-6px;">매도 체크리스트의 "투자논리 점검"에 표시되는 항목이에요.</p>';
+    html += '<p class="savehint" style="margin-top:-6px;">매도 의사결정의 "투자논리 점검"에 표시되는 항목이에요.</p>';
     THESIS_DAMAGE_ITEMS.forEach(function(item){
       html += '<div class="checklist-manage-row">';
       html += '<input type="text" class="thesisEditInput" data-id="'+item.id+'" value="'+escapeHtml(item.text)+'">';
