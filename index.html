@@ -2487,10 +2487,10 @@ window.addEventListener('error', function(ev){
   // ---------- 투자논리 진단 시스템 ----------
   var THESIS_SCORE_ITEMS = [
     { id:'T1', core:true,  title:'핵심 투자논리', question:'내가 매수한 핵심 이유가 아직 유효한가?', options:['유지','약화','훼손'] },
-    { id:'T2', core:false, title:'실적 전망',     question:'향후 실적 전망이 유지되고 있는가?', options:['유지','하향','급격한 하향'] },
     { id:'T3', core:true,  title:'산업 성장성',   question:'투자한 산업의 장기 성장성이 유지되는가?', options:['유지','둔화','구조적 훼손'] },
-    { id:'T4', core:false, title:'경쟁우위',      question:'경쟁사 대비 경쟁력이 유지되고 있는가?', options:['유지','약화','훼손'] },
     { id:'T5', core:true,  title:'펀더멘털',      question:'기업의 본질적인 가치가 훼손되고 있는가?', options:['정상','주의','훼손'] },
+    { id:'T2', core:false, title:'실적 전망',     question:'향후 실적 전망이 유지되고 있는가?', options:['유지','하향','급격한 하향'] },
+    { id:'T4', core:false, title:'경쟁우위',      question:'경쟁사 대비 경쟁력이 유지되고 있는가?', options:['유지','약화','훼손'] },
     { id:'T6', core:false, title:'악재의 성격',   question:'현재 악재가 구조적인 문제인가?', options:['일시적','불확실','구조적'] },
     { id:'T7', core:false, title:'기대와 현실',   question:'시장 기대가 실제 성장성보다 과도하게 높은가?', options:['적정','과도','붕괴'] },
     { id:'T8', core:false, title:'대체 투자',     question:'현재 더 매력적인 투자처가 있는가?', options:['없음','일부 있음','명확히 있음'] }
@@ -3395,14 +3395,39 @@ window.addEventListener('error', function(ev){
     try{ localStorage.setItem(RISK_INDEX_LOCAL_KEY, JSON.stringify(riskThresholds)); }catch(e){}
   }
 
+  var VIX_BANDS = [
+    { max:15, emoji:'🟢', label:'안정', color:'var(--pine)' },
+    { max:20, emoji:'🟢', label:'정상', color:'var(--pine)' },
+    { max:25, emoji:'🟡', label:'주의', color:'var(--olive)' },
+    { max:30, emoji:'🟠', label:'공포', color:'#c97a3d' },
+    { max:40, emoji:'🔴', label:'극심한 공포', color:'var(--brick)' },
+    { max:Infinity, emoji:'🚨', label:'극단적 공포', color:'var(--brick)' }
+  ];
+  var VKOSPI_BANDS = [
+    { max:20, emoji:'🟢', label:'안정', color:'var(--pine)' },
+    { max:30, emoji:'🟢', label:'정상', color:'var(--pine)' },
+    { max:40, emoji:'🟡', label:'주의', color:'var(--olive)' },
+    { max:60, emoji:'🟠', label:'공포', color:'#c97a3d' },
+    { max:80, emoji:'🔴', label:'극심한 공포', color:'var(--brick)' },
+    { max:Infinity, emoji:'🚨', label:'극단적 공포', color:'var(--brick)' }
+  ];
+  function bandTierFor(value, bands){
+    for(var i=0; i<bands.length; i++){
+      if(value < bands[i].max) return bands[i];
+    }
+    return bands[bands.length-1];
+  }
+
   var MAJOR_QUOTE_META = [
-    { key:'wti', label:'국제유가(WTI)', unit:'$', unitPos:'prefix', thresholdKey:'wti' },
-    { key:'us10y', label:'미국채 10년물', unit:'%', unitPos:'suffix', thresholdKey:'us10y' },
-    { key:'us30y', label:'미국채 30년물', unit:'%', unitPos:'suffix', thresholdKey:'us30y' },
-    { key:'fx', label:'환율(USD/KRW)', unit:'원', unitPos:'suffix', thresholdKey:'fx' },
-    { key:'vix', label:'변동성지수(VIX)', unit:'', unitPos:'suffix', thresholdKey:'vix' },
-    { key:'sox', label:'필라델피아반도체지수', unit:'', unitPos:'suffix', thresholdKey:null },
-    { key:'btc', label:'비트코인', unit:'$', unitPos:'prefix', thresholdKey:null }
+    { key:'wti', label:'국제유가(WTI)', icon:'🛢️', unit:'$', unitPos:'prefix', thresholdKey:'wti' },
+    { key:'us10y', label:'미국채 10년물', icon:'🇺🇸', unit:'%', unitPos:'suffix', thresholdKey:'us10y' },
+    { key:'us30y', label:'미국채 30년물', icon:'🇺🇸', unit:'%', unitPos:'suffix', thresholdKey:'us30y' },
+    { key:'fx', label:'환율(USD/KRW)', icon:'💵', unit:'원', unitPos:'suffix', thresholdKey:'fx' },
+    { key:'gold', label:'금시세', icon:'🥇', unit:'$', unitPos:'prefix', thresholdKey:null },
+    { key:'sox', label:'필라델피아반도체지수', icon:'🔌', unit:'', unitPos:'suffix', thresholdKey:null },
+    { key:'btc', label:'비트코인', icon:'🪙', unit:'$', unitPos:'prefix', thresholdKey:null },
+    { key:'vix', label:'변동성지수(VIX)', icon:'🌀', unit:'', unitPos:'suffix', thresholdKey:null, bands:VIX_BANDS },
+    { key:'vkospi', label:'VKOSPI', icon:'🌀', unit:'', unitPos:'suffix', thresholdKey:null, bands:VKOSPI_BANDS }
   ];
   var majorQuoteCache = {};
   async function fetchMajorQuoteData(){
@@ -3620,13 +3645,15 @@ window.addEventListener('error', function(ev){
       var changePct = (price != null && prev != null && prev !== 0) ? ((price - prev) / prev * 100) : null;
       var threshold = idx.thresholdKey ? riskThresholds[idx.thresholdKey] : 0;
       var tier;
-      if(!idx.thresholdKey || !threshold){
+      if(idx.bands){
+        tier = (price != null) ? bandTierFor(price, idx.bands) : null;
+      }else if(!idx.thresholdKey || !threshold){
         tier = null;
       }else{
         tier = (price != null && price > threshold) ? {emoji:'🚨',label:'위험',color:'var(--brick)'} : {emoji:'🟢',label:'정상',color:'var(--pine)'};
       }
       html += '<tr>';
-      html += '<td>'+idx.label+'</td>';
+      html += '<td>'+idx.icon+' '+idx.label+'</td>';
       html += '<td>'+(price!=null ? (idx.unitPos==='prefix' ? idx.unit+price.toLocaleString(undefined,{maximumFractionDigits:2}) : price.toLocaleString(undefined,{maximumFractionDigits:2})+idx.unit) : '-')+'</td>';
       html += '<td>'+(changePct!=null ? '<span style="color:'+(changePct>=0?'var(--brick)':'var(--blue)')+';font-weight:600;">'+(changePct>=0?'+':'-')+Math.abs(changePct).toFixed(1)+'%</span>' : '-')+'</td>';
       html += '<td style="white-space:nowrap;">'+(tier ? '<span style="color:'+tier.color+';font-weight:700;">'+tier.emoji+' '+tier.label+'</span>' : '<span style="color:var(--ink-faint);">-</span>')+'</td>';
@@ -3641,7 +3668,6 @@ window.addEventListener('error', function(ev){
       html += '<div class="field"><span class="field-label field-label-strong">📜 미국채 10년물 위험지수(%)</span><input type="number" step="0.01" id="ri_us10y" value="'+(riskThresholds.us10y||'')+'"></div>';
       html += '<div class="field"><span class="field-label field-label-strong">📜 미국채 30년물 위험지수(%)</span><input type="number" step="0.01" id="ri_us30y" value="'+(riskThresholds.us30y||'')+'"></div>';
       html += '<div class="field"><span class="field-label field-label-strong">💱 환율(USD/KRW) 위험지수(원)</span><input type="number" id="ri_fx" value="'+(riskThresholds.fx||'')+'"></div>';
-      html += '<div class="field"><span class="field-label field-label-strong">📊 변동성지수(VIX) 위험지수</span><input type="number" step="0.1" id="ri_vix" value="'+(riskThresholds.vix||'')+'"></div>';
       html += '<button class="savebtn" id="ri_saveBtn" type="button" style="width:100%;">저장</button>';
       html += '<p class="toast" id="ri_toast"></p>';
       html += '</div>';
@@ -3832,7 +3858,6 @@ window.addEventListener('error', function(ev){
         riskThresholds.us10y = parseFloat(document.getElementById('ri_us10y').value) || 0;
         riskThresholds.us30y = parseFloat(document.getElementById('ri_us30y').value) || 0;
         riskThresholds.fx = parseFloat(document.getElementById('ri_fx').value) || 0;
-        riskThresholds.vix = parseFloat(document.getElementById('ri_vix').value) || 0;
         await saveRiskThresholds();
         var t = document.getElementById('ri_toast');
         t.style.color = 'var(--pine)';
@@ -4192,11 +4217,16 @@ window.addEventListener('error', function(ev){
           var pc = h.profit >= 0 ? 'var(--brick)' : 'var(--blue)';
           html += '<div class="holding-sub" style="color:'+pc+';font-weight:600;">평가수익 '+(h.profit>=0?'+':'')+formatWon(h.profit)+'원 ('+(h.profitPct>=0?'+':'')+h.profitPct.toFixed(1)+'%)</div>';
         }
-        var stopLossAmt = h.marketValue * (1 - sellSettings.stopLossPct/100);
+        html += '<div style="border-top:1px solid var(--line);margin:8px 0;"></div>';
+        var stopLossFromCurrentAmt = h.marketValue * (1 - sellSettings.stopLossPct/100);
+        var stopLossFromCurrentUnit = h.currentPrice != null ? h.currentPrice * (1 - sellSettings.stopLossPct/100) : null;
+        var stopLossFromAvgAmt = h.totalCost * (1 - sellSettings.stopLossPct/100);
+        var stopLossFromAvgUnit = h.avgPrice * (1 - sellSettings.stopLossPct/100);
         var takeProfitAmt = h.marketValue * (1 + sellSettings.takeProfitPct/100);
-        var stopLossUnit = h.currentPrice != null ? h.currentPrice * (1 - sellSettings.stopLossPct/100) : null;
         var takeProfitUnit = h.currentPrice != null ? h.currentPrice * (1 + sellSettings.takeProfitPct/100) : null;
-        html += '<div class="holding-sub sltp-line">손절가 <b style="color:var(--blue);">'+formatWon(stopLossAmt)+'원</b>'+(stopLossUnit!=null?'(단가 '+formatWon(stopLossUnit)+'원)':'')+' · 익절가 <b style="color:var(--brick);">'+formatWon(takeProfitAmt)+'원</b>'+(takeProfitUnit!=null?'(단가 '+formatWon(takeProfitUnit)+'원)':'')+'</div>';
+        html += '<div class="holding-sub sltp-line">손절가(현재가 기준) <b style="color:var(--blue);">'+formatWon(stopLossFromCurrentAmt)+'원</b>'+(stopLossFromCurrentUnit!=null?'(단가 '+formatWon(stopLossFromCurrentUnit)+'원)':'')+'</div>';
+        html += '<div class="holding-sub sltp-line">손절가(매입가 기준) <b style="color:var(--blue);">'+formatWon(stopLossFromAvgAmt)+'원</b>(단가 '+formatWon(stopLossFromAvgUnit)+'원)</div>';
+        html += '<div class="holding-sub sltp-line">익절가 <b style="color:var(--brick);">'+formatWon(takeProfitAmt)+'원</b>'+(takeProfitUnit!=null?'(단가 '+formatWon(takeProfitUnit)+'원)':'')+'</div>';
         var holdingSafeId = tickerToSafeId(h.ticker);
         html += '<button class="holding-toggle-btn" data-toggle-id="'+holdingSafeId+'" type="button">펼쳐보기 ▾</button>';
         html += '<div class="holding-row2" id="holdingDetails_'+holdingSafeId+'" style="display:none;">';
