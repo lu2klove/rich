@@ -2640,10 +2640,12 @@ window.addEventListener('error', function(ev){
     if(HOLD_CONVICTION_QUESTIONS.length === 0) return null;
     var allAnswered = HOLD_CONVICTION_QUESTIONS.every(function(q){ return !!holdAnswers[q.id]; });
     if(!allAnswered) return null;
-    var hasNo = HOLD_CONVICTION_QUESTIONS.some(function(q){ return holdAnswers[q.id] === 'no'; });
-    var allYes = HOLD_CONVICTION_QUESTIONS.every(function(q){ return holdAnswers[q.id] === 'yes'; });
-    if(hasNo) return { level:'낮음', emoji:'🔴', color:'var(--brick)' };
-    if(allYes) return { level:'높음', emoji:'🟢', color:'var(--pine)' };
+    var total = HOLD_CONVICTION_QUESTIONS.length;
+    var yesCount = HOLD_CONVICTION_QUESTIONS.filter(function(q){ return holdAnswers[q.id] === 'yes'; }).length;
+    var noCount = HOLD_CONVICTION_QUESTIONS.filter(function(q){ return holdAnswers[q.id] === 'no'; }).length;
+    if(noCount > 0) return { level:'낮음', emoji:'🔴', color:'var(--brick)' };
+    var yesRatio = yesCount / total;
+    if(yesRatio >= 0.75) return { level:'높음', emoji:'🟢', color:'var(--pine)' };
     return { level:'보통', emoji:'🟡', color:'var(--olive)' };
   }
   function getMarketRiskForTicker(ticker){
