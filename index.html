@@ -1727,8 +1727,7 @@
   <div class="header-row">
     <h1>📝 투자일지</h1>
     <div class="header-btns">
-      <button class="assetbtn" id="cycleDetectBtn" type="button">📈 상승 사이클 감지</button>
-      <button class="assetbtn" id="sellChecklistBtn" type="button">📋 매도 의사결정</button>
+      <button class="assetbtn" id="investJudgmentBtn" type="button">🧭 투자판단</button>
       <button class="assetbtn" id="reviewBtn" type="button">🔍 복기</button>
       <button class="assetbtn" id="assetMgmtBtn" type="button">📊 자산관리</button>
     </div>
@@ -1885,22 +1884,20 @@
   <div class="asset-body" id="assetBody"></div>
 </div>
 
-<div class="asset-screen" id="cycleDetectScreen">
+<div class="asset-screen" id="investJudgmentScreen">
   <div class="asset-header">
-    <button class="asset-back" id="cycleDetectBackBtn" type="button">‹ 뒤로</button>
-    <span class="asset-title">📈 상승 사이클 감지</span>
-    <span style="width:44px;"></span>
-  </div>
-  <div class="asset-body" id="cycleDetectBody"></div>
-</div>
-
-<div class="asset-screen" id="sellChecklistScreen">
-  <div class="asset-header">
-    <button class="asset-back" id="sellChecklistBackBtn" type="button">‹ 뒤로</button>
-    <span class="asset-title">📋 매도 의사결정</span>
+    <button class="asset-back" id="investJudgmentBackBtn" type="button">‹ 뒤로</button>
+    <span class="asset-title">🧭 투자판단</span>
     <button class="asset-back" id="manageChecklistBtn" type="button" aria-label="체크리스트 관리">✏️</button>
   </div>
-  <div class="asset-body" id="sellChecklistBody"></div>
+  <div class="asset-body">
+    <div class="chiprow" id="judgmentTabChips" style="margin-bottom:16px;">
+      <button class="chip" data-tab="cycle" type="button">📈 상승 사이클 감지</button>
+      <button class="chip" data-tab="sell" type="button">📋 매도 의사결정</button>
+    </div>
+    <div id="cycleDetectBody"></div>
+    <div id="sellChecklistBody"></div>
+  </div>
 </div>
 
 <div class="asset-screen" id="checklistManageScreen">
@@ -2570,6 +2567,21 @@ window.addEventListener('error', function(ev){
   var CYCLE_STATE_KEY = 'investment:cyclestate';
   var CYCLE_STATE_LOCAL_KEY = 'investment_journal_cyclestate_v1';
   var cycleState = { stage:null, signals:{}, note:'' };
+  var judgmentActiveTab = 'cycle';
+  function switchJudgmentTab(tab){
+    judgmentActiveTab = tab;
+    document.querySelectorAll('#judgmentTabChips .chip').forEach(function(c){
+      c.classList.toggle('selected', c.getAttribute('data-tab') === tab);
+    });
+    document.getElementById('cycleDetectBody').style.display = (tab === 'cycle') ? 'block' : 'none';
+    document.getElementById('sellChecklistBody').style.display = (tab === 'sell') ? 'block' : 'none';
+    document.getElementById('manageChecklistBtn').style.visibility = (tab === 'sell') ? 'visible' : 'hidden';
+    if(tab === 'cycle'){
+      renderCycleDetectScreen();
+    }else{
+      renderSellChecklistScreen();
+    }
+  }
   async function loadCycleState(){
     if(hasClaudeStorage()){
       try{
@@ -2635,7 +2647,13 @@ window.addEventListener('error', function(ev){
     var pctDrop = (compareVal - current) / compareVal * 100;
     return computeRiskTier(pctDrop, sellSettings.stopLossPct);
   }
-  function computeFinalVerdict(thesisScore, overrideHits, holdConviction, sellReason){
+  function computeFinalVerdict(thesisScore, overrideHits, holdConviction, sellReason, thesisAnswered){
+    if(!thesisAnswered){
+      return {
+        emoji:'⚪', label:'판단 대기', color:'var(--ink-faint)',
+        reason:'아직 투자논리 문항에 응답하지 않았어요. A번 문항들에 답하면 진단이 시작돼요.'
+      };
+    }
     if(overrideHits && overrideHits.length > 0){
       var hitNames = overrideHits.map(function(h){ return h.title; }).join(', ');
       return {
@@ -3347,19 +3365,19 @@ window.addEventListener('error', function(ev){
 
   var RISK_INDEX_KEY = 'investment:riskthresholds';
   var RISK_INDEX_LOCAL_KEY = 'investment_journal_riskthresholds_v1';
-  var riskThresholds = { wti:0, us10y:0, us30y:0, fx:0 };
+  var riskThresholds = { wti:0, us10y:0, us30y:0, fx:0, vix:0 };
 
   async function loadRiskThresholds(){
     if(hasClaudeStorage()){
       try{
         var res = await window.storage.get(RISK_INDEX_KEY, false);
-        if(res && res.value) return Object.assign({wti:0,us10y:0,us30y:0,fx:0}, JSON.parse(res.value));
+        if(res && res.value) return Object.assign({wti:0,us10y:0,us30y:0,fx:0,vix:0}, JSON.parse(res.value));
         return { wti:0, us10y:0, us30y:0, fx:0 };
       }catch(e){ return { wti:0, us10y:0, us30y:0, fx:0 }; }
     }
     try{
       var raw = localStorage.getItem(RISK_INDEX_LOCAL_KEY);
-      return raw ? Object.assign({wti:0,us10y:0,us30y:0,fx:0}, JSON.parse(raw)) : { wti:0, us10y:0, us30y:0, fx:0 };
+      return raw ? Object.assign({wti:0,us10y:0,us30y:0,fx:0,vix:0}, JSON.parse(raw)) : { wti:0, us10y:0, us30y:0, fx:0, vix:0 };
     }catch(e){ return { wti:0, us10y:0, us30y:0, fx:0 }; }
   }
   async function saveRiskThresholds(){
@@ -3378,6 +3396,7 @@ window.addEventListener('error', function(ev){
     html += '<div class="field"><span class="field-label field-label-strong">📜 미국채 10년물 위험지수(%)</span><input type="number" step="0.01" id="ri_us10y" value="'+(riskThresholds.us10y||'')+'"></div>';
     html += '<div class="field"><span class="field-label field-label-strong">📜 미국채 30년물 위험지수(%)</span><input type="number" step="0.01" id="ri_us30y" value="'+(riskThresholds.us30y||'')+'"></div>';
     html += '<div class="field"><span class="field-label field-label-strong">💱 환율(USD/KRW) 위험지수(원)</span><input type="number" id="ri_fx" value="'+(riskThresholds.fx||'')+'"></div>';
+    html += '<div class="field"><span class="field-label field-label-strong">📊 변동성지수(VIX) 위험지수</span><input type="number" step="0.1" id="ri_vix" value="'+(riskThresholds.vix||'')+'"></div>';
     html += '<button class="savebtn" id="ri_saveBtn" type="button" style="width:100%;">저장</button>';
     html += '<p class="toast" id="ri_toast"></p>';
     html += '<p class="savehint">여기서 설정한 위험지수는 매도 의사결정의 "시장 현황"에서 실제 시세와 비교돼요.</p>';
@@ -3389,6 +3408,7 @@ window.addEventListener('error', function(ev){
       riskThresholds.us10y = parseFloat(document.getElementById('ri_us10y').value) || 0;
       riskThresholds.us30y = parseFloat(document.getElementById('ri_us30y').value) || 0;
       riskThresholds.fx = parseFloat(document.getElementById('ri_fx').value) || 0;
+      riskThresholds.vix = parseFloat(document.getElementById('ri_vix').value) || 0;
       await saveRiskThresholds();
       var t = document.getElementById('ri_toast');
       t.style.color = 'var(--pine)';
@@ -3402,6 +3422,7 @@ window.addEventListener('error', function(ev){
     { key:'us10y', label:'미국채 10년물', unit:'%', thresholdKey:'us10y' },
     { key:'us30y', label:'미국채 30년물', unit:'%', thresholdKey:'us30y' },
     { key:'fx', label:'환율(USD/KRW)', unit:'원', thresholdKey:'fx' },
+    { key:'vix', label:'변동성지수(VIX)', unit:'', thresholdKey:'vix' },
     { key:'sox', label:'필라델피아반도체지수', unit:'', thresholdKey:null },
     { key:'btc', label:'비트코인', unit:'$', thresholdKey:null }
   ];
@@ -3758,7 +3779,7 @@ window.addEventListener('error', function(ev){
         html += '<p style="font-size:12.5px;color:var(--ink-soft);margin:6px 0 0;">'+escapeHtml(overrideHits.map(function(h){return h.title;}).join(', '))+' 항목이 최악 등급이에요. 다른 항목 점수와 관계없이 매도를 우선 검토하세요.</p>';
         html += '</div>';
       }
-      html += '<p class="savehint" style="font-weight:700;color:var(--brick);margin-top:10px;">🔴 투자논리 점수 '+thesisScore+' / '+THESIS_MAX_SCORE+' ('+thesisAnswered+'/'+THESIS_SCORE_ITEMS.length+' 응답)</p>';
+      html += '<p class="savehint" style="font-weight:700;color:'+(thesisAnswered?'var(--brick)':'var(--ink-faint)')+';margin-top:10px;">🔴 투자논리 점수 '+(thesisAnswered?(thesisScore+' / '+THESIS_MAX_SCORE):'미평가')+' ('+thesisAnswered+'/'+THESIS_SCORE_ITEMS.length+' 응답)</p>';
 
       html += '<p class="field-label field-label-strong" style="margin-top:20px;">📌 B. 보유 의사 점검</p>';
       HOLD_CONVICTION_QUESTIONS.forEach(function(q){
@@ -3790,12 +3811,12 @@ window.addEventListener('error', function(ev){
       var holdConviction = computeHoldConviction(ilState.holdAnswers);
       var marketRisk = getMarketRiskForTicker(investLogicTicker);
       var stockRisk = focusedHolding ? computeRiskTier(-focusedHolding.profitPct, sellSettings.stopLossPct) : null;
-      var finalVerdict = computeFinalVerdict(thesisScore, overrideHits, holdConviction, ilState.sellReason);
+      var finalVerdict = computeFinalVerdict(thesisScore, overrideHits, holdConviction, ilState.sellReason, thesisAnswered);
 
       html += '<div class="verdict-box" id="verdictBox" style="margin-top:20px;">';
       html += '<p class="verdict-pct" style="font-weight:700;">🧠 투자논리 진단 — '+escapeHtml(investLogicTicker)+'</p>';
       html += '<div style="text-align:left;font-size:13.5px;margin:12px 0;line-height:2.1;">';
-      html += '<div style="display:flex;justify-content:space-between;"><span>투자논리 점수</span><b>'+thesisScore+' / '+THESIS_MAX_SCORE+'</b></div>';
+      html += '<div style="display:flex;justify-content:space-between;"><span>투자논리 점수</span><b>'+(thesisAnswered ? (thesisScore+' / '+THESIS_MAX_SCORE) : '미평가')+'</b></div>';
       html += '<div style="display:flex;justify-content:space-between;"><span>보유 확신</span><b style="color:'+(holdConviction?holdConviction.color:'var(--ink-faint)')+';">'+(holdConviction?holdConviction.emoji+' '+holdConviction.level:'미응답')+'</b></div>';
       html += '<div style="display:flex;justify-content:space-between;"><span>시장 위험</span><b style="color:'+(marketRisk?marketRisk.color:'var(--ink-faint)')+';">'+(marketRisk?marketRisk.emoji+' '+marketRisk.label:'지수 미지정/미조회')+'</b></div>';
       html += '<div style="display:flex;justify-content:space-between;"><span>종목 위험</span><b style="color:'+(stockRisk?stockRisk.color:'var(--ink-faint)')+';">'+(stockRisk?stockRisk.emoji+' '+stockRisk.label:'-')+'</b></div>';
@@ -6034,7 +6055,7 @@ window.addEventListener('error', function(ev){
               await saveIndexData();
             }
             if(imported.riskThresholds && typeof imported.riskThresholds === 'object'){
-              riskThresholds = Object.assign({wti:0,us10y:0,us30y:0,fx:0}, imported.riskThresholds);
+              riskThresholds = Object.assign({wti:0,us10y:0,us30y:0,fx:0,vix:0}, imported.riskThresholds);
               await saveRiskThresholds();
               restoredParts.push('지수관리');
             }
@@ -6131,19 +6152,17 @@ window.addEventListener('error', function(ev){
     document.getElementById('assetBackBtn').addEventListener('click', function(){
       document.getElementById('assetScreen').classList.remove('open');
     });
-    document.getElementById('cycleDetectBtn').addEventListener('click', function(){
-      renderCycleDetectScreen();
-      document.getElementById('cycleDetectScreen').classList.add('open');
+    document.getElementById('investJudgmentBtn').addEventListener('click', function(){
+      document.getElementById('investJudgmentScreen').classList.add('open');
+      switchJudgmentTab(judgmentActiveTab);
     });
-    document.getElementById('cycleDetectBackBtn').addEventListener('click', function(){
-      document.getElementById('cycleDetectScreen').classList.remove('open');
+    document.getElementById('investJudgmentBackBtn').addEventListener('click', function(){
+      document.getElementById('investJudgmentScreen').classList.remove('open');
     });
-    document.getElementById('sellChecklistBtn').addEventListener('click', function(){
-      renderSellChecklistScreen();
-      document.getElementById('sellChecklistScreen').classList.add('open');
-    });
-    document.getElementById('sellChecklistBackBtn').addEventListener('click', function(){
-      document.getElementById('sellChecklistScreen').classList.remove('open');
+    document.querySelectorAll('#judgmentTabChips .chip').forEach(function(c){
+      c.addEventListener('click', function(){
+        switchJudgmentTab(c.getAttribute('data-tab'));
+      });
     });
     document.getElementById('manageChecklistBtn').addEventListener('click', function(){
       renderChecklistManageScreen();
