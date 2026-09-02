@@ -137,7 +137,7 @@ async function handleIndexRequest(indexKey) {
   const NAVER_DOMESTIC = { kospi: 'KOSPI', kosdaq: 'KOSDAQ' };
   const YAHOO_WORLD = {
     nasdaq: '^IXIC', snp500: '^GSPC', wti: 'CL=F', us10y: '^TNX', us30y: '^TYX',
-    fx: 'KRW=X', sox: '^SOX', dow: '^DJI', btc: 'BTC-USD',
+    fx: 'KRW=X', sox: '^SOX', dow: '^DJI', btc: 'BTC-USD', vix: '^VIX',
     mkt_kospi: '^KS11', mkt_kosdaq: '^KQ11', mkt_dow: '^DJI', mkt_snp500: '^GSPC', mkt_nasdaq: '^IXIC'
   };
 
