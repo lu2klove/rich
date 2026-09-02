@@ -1908,9 +1908,11 @@
   <div class="asset-body">
     <div class="chiprow" id="judgmentTabChips" style="margin-bottom:16px;">
       <button class="chip" data-tab="cycle" type="button">📈 상승 사이클 감지</button>
+      <button class="chip" data-tab="marketrisk" type="button">📊 시장 위험</button>
       <button class="chip" data-tab="sell" type="button">📋 매도 의사결정</button>
     </div>
     <div id="cycleDetectBody"></div>
+    <div id="marketRiskBody"></div>
     <div id="sellChecklistBody"></div>
   </div>
 </div>
@@ -2580,10 +2582,13 @@ window.addEventListener('error', function(ev){
       c.classList.toggle('selected', c.getAttribute('data-tab') === tab);
     });
     document.getElementById('cycleDetectBody').style.display = (tab === 'cycle') ? 'block' : 'none';
+    document.getElementById('marketRiskBody').style.display = (tab === 'marketrisk') ? 'block' : 'none';
     document.getElementById('sellChecklistBody').style.display = (tab === 'sell') ? 'block' : 'none';
     document.getElementById('manageChecklistBtn').style.visibility = (tab === 'sell') ? 'visible' : 'hidden';
     if(tab === 'cycle'){
       renderCycleDetectScreen();
+    }else if(tab === 'marketrisk'){
+      renderMarketRiskScreen();
     }else{
       renderSellChecklistScreen();
     }
@@ -3418,6 +3423,171 @@ window.addEventListener('error', function(ev){
     return bands[bands.length-1];
   }
 
+  // ---------- 시장 위험 엔진 ----------
+  var MKR_KOSPI_TREND_BANDS = [
+    { max:5, emoji:'🟢', label:'정상', score:0 },
+    { max:10, emoji:'🟡', label:'주의', score:8 },
+    { max:15, emoji:'🟠', label:'추세 훼손', score:17 },
+    { max:Infinity, emoji:'🔴', label:'강한 추세 훼손', score:25 }
+  ];
+  var MKR_KOSDAQ_TREND_BANDS = [
+    { max:7, emoji:'🟢', label:'정상', score:0 },
+    { max:12, emoji:'🟡', label:'주의', score:8 },
+    { max:20, emoji:'🟠', label:'추세 훼손', score:17 },
+    { max:Infinity, emoji:'🔴', label:'강한 추세 훼손', score:25 }
+  ];
+  function mkrVkospiScore(v){
+    if(v < 20) return 0;
+    if(v < 30) return 10;
+    if(v < 40) return 25;
+    return 40;
+  }
+  function mkrCorrScore(corr){
+    if(corr == null) return 0;
+    var a = Math.abs(corr);
+    if(a >= 0.7) return 10;
+    if(a >= 0.5) return 7;
+    if(a >= 0.3) return 4;
+    return 0;
+  }
+  function mkrCorrLabel(corr){
+    if(corr == null) return '데이터 부족';
+    var a = Math.abs(corr);
+    var strength = a >= 0.7 ? '매우 강한' : (a >= 0.5 ? '강한' : (a >= 0.3 ? '보통' : '약한'));
+    return strength + (corr < 0 ? ' 역상관' : ' 상관');
+  }
+  var MKR_FINAL_TIERS = [
+    { max:20, emoji:'🟢', label:'안정', color:'var(--pine)' },
+    { max:40, emoji:'🟡', label:'주의', color:'var(--olive)' },
+    { max:60, emoji:'🟠', label:'위험 증가', color:'#c97a3d' },
+    { max:80, emoji:'🔴', label:'고위험', color:'var(--brick)' },
+    { max:Infinity, emoji:'🚨', label:'극단적 위험', color:'var(--brick)' }
+  ];
+  var MKR_ACTION_GUIDE = {
+    '안정':      { buy:'정상 진행', chase:'🚫 자제', cash:'유지', holding:'정상 관리' },
+    '주의':      { buy:'⚠️ 신중', chase:'🚫 금지', cash:'🔎 점검', holding:'🔎 점검' },
+    '위험 증가':  { buy:'⚠️ 신중', chase:'🚫 금지', cash:'🔎 확대 검토', holding:'🔎 투자논리 재점검' },
+    '고위험':    { buy:'🚫 금지', chase:'🚫 금지', cash:'📈 확대', holding:'🔎 투자논리 재점검' },
+    '극단적 위험':{ buy:'🚫 금지', chase:'🚫 금지', cash:'📈 적극 확대', holding:'🚨 즉시 재점검' }
+  };
+
+  function computeMarketRisk(vkospi, kospiDrop, kosdaqDrop, corr){
+    var result = { vkospi:vkospi, kospiDrop:kospiDrop, kosdaqDrop:kosdaqDrop, corr:corr };
+    if(vkospi == null || kospiDrop == null || kosdaqDrop == null){
+      result.incomplete = true;
+      return result;
+    }
+    var kospiTier = bandTierFor(kospiDrop, MKR_KOSPI_TREND_BANDS);
+    var kosdaqTier = bandTierFor(kosdaqDrop, MKR_KOSDAQ_TREND_BANDS);
+    result.kospiTier = kospiTier;
+    result.kosdaqTier = kosdaqTier;
+
+    var volHigh = vkospi >= 30;
+    var trendDamaged = (kospiDrop > 5) || (kosdaqDrop > 7);
+    if(!volHigh && !trendDamaged) result.quadrant = { emoji:'🟢', label:'정상' };
+    else if(!volHigh && trendDamaged) result.quadrant = { emoji:'🟠', label:'추세 위험' };
+    else if(volHigh && !trendDamaged) result.quadrant = { emoji:'🟡', label:'변동성 확대' };
+    else result.quadrant = { emoji:'🔴', label:'복합 위험' };
+
+    var scoreA = mkrVkospiScore(vkospi);
+    var scoreB = kospiTier.score;
+    var scoreC = kosdaqTier.score;
+    var scoreD = mkrCorrScore(corr);
+    var total = scoreA + scoreB + scoreC + scoreD;
+    result.scoreBreakdown = { vkospi:scoreA, kospi:scoreB, kosdaq:scoreC, corr:scoreD, total:total };
+
+    // 예외 규칙 (점수보다 우선)
+    if(vkospi >= 40 && kospiDrop < 5 && kosdaqDrop < 7){
+      result.verdict = { emoji:'🟠', label:'위험 증가', color:'#c97a3d',
+        reason:'변동성은 높지만 아직 추세 훼손은 아니에요.' };
+    }else if(vkospi >= 40 && kospiDrop >= 5 && kospiDrop <= 10 && kosdaqDrop >= 7 && kosdaqDrop <= 12){
+      result.verdict = { emoji:'🔴', label:'고위험', color:'var(--brick)',
+        reason:'변동성이 높아지고 시장 추세도 약화되고 있어요. 위험관리가 필요해요.' };
+    }else if(vkospi >= 40 && kospiDrop > 10 && kosdaqDrop > 12){
+      result.verdict = { emoji:'🚨', label:'극단적 위험', color:'var(--brick)',
+        reason:'한국 증시 변동성이 높고, 특히 코스닥의 추세 위험이 크게 확대됐어요. 적극적인 위험관리가 필요해요.' };
+    }else if(vkospi < 30 && kospiDrop > 10 && kosdaqDrop > 12){
+      result.verdict = { emoji:'🔴', label:'고위험', color:'var(--brick)',
+        reason:'변동성은 안정되고 있지만 지수 추세가 이미 훼손됐어요. 변동성보다 추세 위험을 우선 점검하세요.' };
+    }else{
+      var tier = bandTierFor(total, MKR_FINAL_TIERS);
+      var reason = '';
+      if(kospiDrop <= 5 && kosdaqDrop <= 5){
+        reason = '변동성과 지수 추세 모두 안정적인 편이에요.';
+      }else{
+        var worse = kosdaqTier.score >= kospiTier.score ? '코스닥' : 'KOSPI';
+        reason = (volHigh ? '변동성이 다소 높은 수준이에요. ' : '변동성은 안정적인 편이에요. ') + worse+' 쪽 추세 위험에 좀 더 주의가 필요해요.';
+      }
+      result.verdict = { emoji:tier.emoji, label:tier.label, color:tier.color, reason:reason };
+    }
+    result.total = total;
+    return result;
+  }
+
+  // ---------- VKOSPI/KOSPI/KOSDAQ 일별 스냅샷 (상관관계 계산용) ----------
+  var MKR_HISTORY_KEY = 'investment:mkrhistory';
+  var MKR_HISTORY_LOCAL_KEY = 'investment_journal_mkrhistory_v1';
+  var mkrHistory = []; // [{date, vkospi, kospi, kosdaq}]
+  async function loadMkrHistory(){
+    if(hasClaudeStorage()){
+      try{
+        var res = await window.storage.get(MKR_HISTORY_KEY, false);
+        return (res && res.value) ? JSON.parse(res.value) : [];
+      }catch(e){ return []; }
+    }
+    try{
+      var raw = localStorage.getItem(MKR_HISTORY_LOCAL_KEY);
+      return raw ? JSON.parse(raw) : [];
+    }catch(e){ return []; }
+  }
+  async function saveMkrHistory(){
+    if(hasClaudeStorage()){
+      try{ await window.storage.set(MKR_HISTORY_KEY, JSON.stringify(mkrHistory), false); }catch(e){}
+      return;
+    }
+    try{ localStorage.setItem(MKR_HISTORY_LOCAL_KEY, JSON.stringify(mkrHistory)); }catch(e){}
+  }
+  async function recordMkrSnapshot(vkospi, kospi, kosdaq){
+    if(vkospi == null || kospi == null || kosdaq == null) return;
+    var today = new Date().toISOString().slice(0,10);
+    var existingIdx = mkrHistory.findIndex(function(s){ return s.date === today; });
+    var snap = { date:today, vkospi:vkospi, kospi:kospi, kosdaq:kosdaq };
+    if(existingIdx > -1) mkrHistory[existingIdx] = snap;
+    else mkrHistory.push(snap);
+    mkrHistory.sort(function(a,b){ return a.date < b.date ? -1 : 1; });
+    if(mkrHistory.length > 90) mkrHistory = mkrHistory.slice(mkrHistory.length - 90);
+    await saveMkrHistory();
+  }
+  function pearsonCorr(xs, ys){
+    var n = xs.length;
+    if(n < 2) return null;
+    var mx = xs.reduce(function(a,b){return a+b;},0)/n;
+    var my = ys.reduce(function(a,b){return a+b;},0)/n;
+    var num = 0, dx2 = 0, dy2 = 0;
+    for(var i=0;i<n;i++){
+      var dx = xs[i]-mx, dy = ys[i]-my;
+      num += dx*dy; dx2 += dx*dx; dy2 += dy*dy;
+    }
+    var denom = Math.sqrt(dx2*dy2);
+    return denom === 0 ? null : (num/denom);
+  }
+  function computeMkrCorrelations(){
+    var recent = mkrHistory.slice(-61);
+    if(recent.length < 11) return { kospi:null, kosdaq:null, days:recent.length-1 };
+    var vkospiChanges = [], kospiChanges = [], kosdaqChanges = [];
+    for(var i=1;i<recent.length;i++){
+      var prev = recent[i-1], cur = recent[i];
+      if(prev.vkospi > 0) vkospiChanges.push((cur.vkospi - prev.vkospi)/prev.vkospi*100);
+      if(prev.kospi > 0) kospiChanges.push((cur.kospi - prev.kospi)/prev.kospi*100);
+      if(prev.kosdaq > 0) kosdaqChanges.push((cur.kosdaq - prev.kosdaq)/prev.kosdaq*100);
+    }
+    return {
+      kospi: pearsonCorr(vkospiChanges, kospiChanges),
+      kosdaq: pearsonCorr(vkospiChanges, kosdaqChanges),
+      days: recent.length - 1
+    };
+  }
+
   var MAJOR_QUOTE_META = [
     { key:'wti', label:'국제유가(WTI)', icon:'🛢️', unit:'$', unitPos:'prefix', thresholdKey:'wti' },
     { key:'us10y', label:'미국채 10년물', icon:'🇺🇸', unit:'%', unitPos:'suffix', thresholdKey:'us10y' },
@@ -3559,6 +3729,94 @@ window.addEventListener('error', function(ev){
       investLogicState = {};
       await saveHoldQuestions();
       renderChecklistManageScreen();
+    });
+  }
+
+  function renderMarketRiskScreen(){
+    var body = document.getElementById('marketRiskBody');
+    var kospiData = marketStatusCache['mkt_kospi'];
+    var kosdaqData = marketStatusCache['mkt_kosdaq'];
+    var kospiCurrent = kospiData ? kospiData.price : null;
+    var kospiHigh = kospiData ? kospiData.fiftyTwoWeekHigh : null;
+    var kosdaqCurrent = kosdaqData ? kosdaqData.price : null;
+    var kosdaqHigh = kosdaqData ? kosdaqData.fiftyTwoWeekHigh : null;
+    var kospiDrop = (kospiCurrent != null && kospiHigh != null && kospiHigh > 0) ? (kospiHigh - kospiCurrent)/kospiHigh*100 : null;
+    var kosdaqDrop = (kosdaqCurrent != null && kosdaqHigh != null && kosdaqHigh > 0) ? (kosdaqHigh - kosdaqCurrent)/kosdaqHigh*100 : null;
+
+    if(vkospiManualValue != null && kospiCurrent != null && kosdaqCurrent != null){
+      recordMkrSnapshot(vkospiManualValue, kospiCurrent, kosdaqCurrent);
+    }
+    var corrData = computeMkrCorrelations();
+    var bestCorr = null;
+    if(corrData.kospi != null || corrData.kosdaq != null){
+      var a = corrData.kospi != null ? Math.abs(corrData.kospi) : -1;
+      var b = corrData.kosdaq != null ? Math.abs(corrData.kosdaq) : -1;
+      bestCorr = a >= b ? corrData.kospi : corrData.kosdaq;
+    }
+    var mkr = computeMarketRisk(vkospiManualValue, kospiDrop, kosdaqDrop, bestCorr);
+
+    if(mkr.incomplete && !marketStatusFetchAttempted){
+      marketStatusFetchAttempted = true;
+      fetchMarketStatusData().then(function(){ renderMarketRiskScreen(); });
+    }
+
+    var html = '';
+    html += '<p class="card-title no-divider" style="margin-top:0;">📊 한국 증시 시장 위험</p>';
+
+    if(mkr.incomplete){
+      html += '<p class="empty-inline">VKOSPI 값을 입력하고, 시장·종목 시세를 새로고침하면 시장 위험 진단이 표시돼요. (VKOSPI는 매도 의사결정 탭의 "주요 지수 시세"에서 입력할 수 있어요)</p>';
+      html += '<button class="cancelbtn" id="mkrFetchBtn" type="button" style="width:100%;margin-top:12px;">🔄 시장 시세 새로고침</button>';
+      body.innerHTML = html;
+      document.getElementById('mkrFetchBtn').addEventListener('click', async function(){
+        await fetchMarketStatusData();
+        renderMarketRiskScreen();
+      });
+      return;
+    }
+
+    html += '<div class="rule-card">';
+    html += '<div style="display:flex;justify-content:space-between;padding:4px 0;"><span>VKOSPI</span><b>'+mkr.vkospi.toFixed(2)+'</b></div>';
+    html += '<div style="display:flex;justify-content:space-between;padding:4px 0;"><span>KOSPI (52주 고점대비)</span><b>'+(kospiDrop>=0?'-':'+')+Math.abs(kospiDrop).toFixed(1)+'% '+mkr.kospiTier.emoji+'</b></div>';
+    html += '<div style="display:flex;justify-content:space-between;padding:4px 0;"><span>KOSDAQ (52주 고점대비)</span><b>'+(kosdaqDrop>=0?'-':'+')+Math.abs(kosdaqDrop).toFixed(1)+'% '+mkr.kosdaqTier.emoji+'</b></div>';
+    html += '</div>';
+
+    html += '<p class="field-label field-label-strong" style="margin-top:16px;">📐 60일 변동성 상관관계</p>';
+    if(corrData.days < 10){
+      html += '<p class="savehint">데이터가 '+corrData.days+'일 쌓였어요 (10일 이상부터 계산돼요). 이 화면을 열 때마다 하루치씩 자동으로 쌓여요.</p>';
+    }else{
+      html += '<div class="rule-card">';
+      html += '<div style="display:flex;justify-content:space-between;padding:4px 0;"><span>VKOSPI ↔ KOSPI</span><b>'+(corrData.kospi!=null?corrData.kospi.toFixed(2)+' ('+mkrCorrLabel(corrData.kospi)+')':'-')+'</b></div>';
+      html += '<div style="display:flex;justify-content:space-between;padding:4px 0;"><span>VKOSPI ↔ KOSDAQ</span><b>'+(corrData.kosdaq!=null?corrData.kosdaq.toFixed(2)+' ('+mkrCorrLabel(corrData.kosdaq)+')':'-')+'</b></div>';
+      html += '<p class="savehint" style="margin-top:6px;">최근 '+corrData.days+'일 데이터 기준</p>';
+      html += '</div>';
+    }
+
+    html += '<p class="field-label field-label-strong" style="margin-top:16px;">시장 위험도</p>';
+    html += '<div class="verdict-box">';
+    html += '<p class="verdict-label" style="color:'+mkr.verdict.color+';">'+mkr.verdict.emoji+' '+mkr.verdict.label+'</p>';
+    html += '<p class="verdict-pct" style="margin-top:4px;">'+mkr.total+' / 100</p>';
+    html += '<p style="font-size:12px;color:var(--ink-faint);margin-top:10px;">'+mkr.quadrant.emoji+' '+mkr.quadrant.label+' 구간 · 배점(변동성 '+mkr.scoreBreakdown.vkospi+'·KOSPI '+mkr.scoreBreakdown.kospi+'·KOSDAQ '+mkr.scoreBreakdown.kosdaq+'·연동 '+mkr.scoreBreakdown.corr+')</p>';
+    html += '</div>';
+
+    html += '<p class="field-label field-label-strong" style="margin-top:16px;">🧠 시장 분석</p>';
+    html += '<p style="font-size:13px;color:var(--ink-soft);line-height:1.6;">'+escapeHtml(mkr.verdict.reason)+'</p>';
+
+    var guide = MKR_ACTION_GUIDE[mkr.verdict.label] || MKR_ACTION_GUIDE['주의'];
+    html += '<p class="field-label field-label-strong" style="margin-top:16px;">📌 투자 행동</p>';
+    html += '<div class="rule-card">';
+    html += '<div style="display:flex;justify-content:space-between;padding:4px 0;"><span>신규 매수</span><b>'+guide.buy+'</b></div>';
+    html += '<div style="display:flex;justify-content:space-between;padding:4px 0;"><span>추격매수</span><b>'+guide.chase+'</b></div>';
+    html += '<div style="display:flex;justify-content:space-between;padding:4px 0;"><span>현금 비중</span><b>'+guide.cash+'</b></div>';
+    html += '<div style="display:flex;justify-content:space-between;padding:4px 0;"><span>보유 종목</span><b>'+guide.holding+'</b></div>';
+    html += '</div>';
+
+    html += '<button class="cancelbtn" id="mkrFetchBtn" type="button" style="width:100%;margin-top:16px;">🔄 시장 시세 새로고침</button>';
+    html += '<p class="savehint">VKOSPI는 매도 의사결정 탭의 "주요 지수 시세"에서 직접 입력해요.</p>';
+
+    body.innerHTML = html;
+    document.getElementById('mkrFetchBtn').addEventListener('click', async function(){
+      await fetchMarketStatusData();
+      renderMarketRiskScreen();
     });
   }
 
@@ -6404,6 +6662,7 @@ window.addEventListener('error', function(ev){
       HOLD_CONVICTION_QUESTIONS = await loadHoldQuestions();
       cycleState = await loadCycleState();
       vkospiManualValue = await loadVkospiManual();
+      mkrHistory = await loadMkrHistory();
       customMoods = await loadCustomMoods();
       renderCustomMoodChips();
       sellChecklistThresholdPct = await loadChecklistThreshold();
