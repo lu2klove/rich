@@ -1927,15 +1927,6 @@
   <div class="asset-body" id="sellPrincipleBody"></div>
 </div>
 
-<div class="asset-screen" id="riskIndexScreen">
-  <div class="asset-header">
-    <button class="asset-back" id="riskIndexBackBtn" type="button">‹ 뒤로</button>
-    <span class="asset-title">🚨 지수 관리</span>
-    <span style="width:44px;"></span>
-  </div>
-  <div class="asset-body" id="riskIndexBody"></div>
-</div>
-
 <div class="asset-screen" id="moodManageScreen">
   <div class="asset-header">
     <button class="asset-back" id="moodManageBackBtn" type="button">‹ 뒤로</button>
@@ -2683,6 +2674,7 @@ window.addEventListener('error', function(ev){
   }
 
   var marketStatusMode = 'high52'; // 'high52' | 'prevclose'
+  var riskSettingsExpanded = false;
   var marketStatusCache = {};
   var stockStatusAccount = '';
   var stockStatusIndexFilter = '';
@@ -3388,35 +3380,6 @@ window.addEventListener('error', function(ev){
     try{ localStorage.setItem(RISK_INDEX_LOCAL_KEY, JSON.stringify(riskThresholds)); }catch(e){}
   }
 
-  function renderRiskIndexScreen(){
-    var body = document.getElementById('riskIndexBody');
-    var html = '';
-    html += '<p class="card-title no-divider">🚨 위험지수 설정</p>';
-    html += '<div class="field"><span class="field-label field-label-strong">🛢️ 국제유가(WTI) 위험지수($)</span><input type="number" id="ri_wti" value="'+(riskThresholds.wti||'')+'"></div>';
-    html += '<div class="field"><span class="field-label field-label-strong">📜 미국채 10년물 위험지수(%)</span><input type="number" step="0.01" id="ri_us10y" value="'+(riskThresholds.us10y||'')+'"></div>';
-    html += '<div class="field"><span class="field-label field-label-strong">📜 미국채 30년물 위험지수(%)</span><input type="number" step="0.01" id="ri_us30y" value="'+(riskThresholds.us30y||'')+'"></div>';
-    html += '<div class="field"><span class="field-label field-label-strong">💱 환율(USD/KRW) 위험지수(원)</span><input type="number" id="ri_fx" value="'+(riskThresholds.fx||'')+'"></div>';
-    html += '<div class="field"><span class="field-label field-label-strong">📊 변동성지수(VIX) 위험지수</span><input type="number" step="0.1" id="ri_vix" value="'+(riskThresholds.vix||'')+'"></div>';
-    html += '<button class="savebtn" id="ri_saveBtn" type="button" style="width:100%;">저장</button>';
-    html += '<p class="toast" id="ri_toast"></p>';
-    html += '<p class="savehint">여기서 설정한 위험지수는 매도 의사결정의 "시장 현황"에서 실제 시세와 비교돼요.</p>';
-
-    body.innerHTML = html;
-
-    document.getElementById('ri_saveBtn').addEventListener('click', async function(){
-      riskThresholds.wti = parseFloat(document.getElementById('ri_wti').value) || 0;
-      riskThresholds.us10y = parseFloat(document.getElementById('ri_us10y').value) || 0;
-      riskThresholds.us30y = parseFloat(document.getElementById('ri_us30y').value) || 0;
-      riskThresholds.fx = parseFloat(document.getElementById('ri_fx').value) || 0;
-      riskThresholds.vix = parseFloat(document.getElementById('ri_vix').value) || 0;
-      await saveRiskThresholds();
-      var t = document.getElementById('ri_toast');
-      t.style.color = 'var(--pine)';
-      t.textContent = '저장됐어요';
-      setTimeout(function(){ t.textContent = ''; }, 1500);
-    });
-  }
-
   var MAJOR_QUOTE_META = [
     { key:'wti', label:'국제유가(WTI)', unit:'$', thresholdKey:'wti' },
     { key:'us10y', label:'미국채 10년물', unit:'%', thresholdKey:'us10y' },
@@ -3655,7 +3618,19 @@ window.addEventListener('error', function(ev){
       html += '</tr>';
     });
     html += '</tbody></table>';
-    html += '<p class="savehint" style="margin-bottom:16px;">위험지수는 자산관리 → 지수 관리에서 설정할 수 있어요.</p>';
+
+    html += '<button class="cancelbtn" id="riskThresholdToggleBtn" type="button" style="width:100%;margin-bottom:10px;">'+(riskSettingsExpanded?'▲ 위험지수 설정 접기':'▼ 위험지수 설정 펼치기')+'</button>';
+    if(riskSettingsExpanded){
+      html += '<div class="rule-card" style="margin-bottom:16px;">';
+      html += '<div class="field"><span class="field-label field-label-strong">🛢️ 국제유가(WTI) 위험지수($)</span><input type="number" id="ri_wti" value="'+(riskThresholds.wti||'')+'"></div>';
+      html += '<div class="field"><span class="field-label field-label-strong">📜 미국채 10년물 위험지수(%)</span><input type="number" step="0.01" id="ri_us10y" value="'+(riskThresholds.us10y||'')+'"></div>';
+      html += '<div class="field"><span class="field-label field-label-strong">📜 미국채 30년물 위험지수(%)</span><input type="number" step="0.01" id="ri_us30y" value="'+(riskThresholds.us30y||'')+'"></div>';
+      html += '<div class="field"><span class="field-label field-label-strong">💱 환율(USD/KRW) 위험지수(원)</span><input type="number" id="ri_fx" value="'+(riskThresholds.fx||'')+'"></div>';
+      html += '<div class="field"><span class="field-label field-label-strong">📊 변동성지수(VIX) 위험지수</span><input type="number" step="0.1" id="ri_vix" value="'+(riskThresholds.vix||'')+'"></div>';
+      html += '<button class="savebtn" id="ri_saveBtn" type="button" style="width:100%;">저장</button>';
+      html += '<p class="toast" id="ri_toast"></p>';
+      html += '</div>';
+    }
 
     html += '<p class="field-label field-label-strong">📊 국내·해외 주요지수</p>';
     html += '<div class="radio-row" style="display:flex;gap:18px;margin-bottom:12px;">';
@@ -3831,6 +3806,27 @@ window.addEventListener('error', function(ev){
 
     body.innerHTML = html;
 
+    document.getElementById('riskThresholdToggleBtn').addEventListener('click', function(){
+      riskSettingsExpanded = !riskSettingsExpanded;
+      renderSellChecklistScreen();
+    });
+    var riSaveBtn = document.getElementById('ri_saveBtn');
+    if(riSaveBtn){
+      riSaveBtn.addEventListener('click', async function(){
+        riskThresholds.wti = parseFloat(document.getElementById('ri_wti').value) || 0;
+        riskThresholds.us10y = parseFloat(document.getElementById('ri_us10y').value) || 0;
+        riskThresholds.us30y = parseFloat(document.getElementById('ri_us30y').value) || 0;
+        riskThresholds.fx = parseFloat(document.getElementById('ri_fx').value) || 0;
+        riskThresholds.vix = parseFloat(document.getElementById('ri_vix').value) || 0;
+        await saveRiskThresholds();
+        var t = document.getElementById('ri_toast');
+        t.style.color = 'var(--pine)';
+        t.textContent = '저장됐어요';
+        setTimeout(function(){
+          renderSellChecklistScreen();
+        }, 900);
+      });
+    }
     document.querySelectorAll('input[name="marketStatusRadio"]').forEach(function(r){
       r.addEventListener('change', function(){
         marketStatusMode = r.value;
@@ -4276,11 +4272,6 @@ window.addEventListener('error', function(ev){
     html += '<span class="ios-sub">손절 '+sellSettings.stopLossPct+'% · 익절 '+sellSettings.takeProfitPct+'%</span>';
     html += '<span class="ios-chevron">›</span>';
     html += '</button>';
-    html += '<button class="ios-row" id="riskIndexRowBtn" type="button">';
-    html += '<span class="ios-icon" style="background:var(--olive);">🚨</span>';
-    html += '<span class="ios-label">지수 관리</span>';
-    html += '<span class="ios-chevron">›</span>';
-    html += '</button>';
     html += '</div>';
 
     html += '<p class="asset-disclaimer">종목 현재가는 네이버증권 등과 실시간 연동되지 않아요(브라우저 보안 정책상 불가능). 직접 입력한 값으로만 손익을 계산해요.</p>';
@@ -4349,10 +4340,6 @@ window.addEventListener('error', function(ev){
     document.getElementById('sellSettingsBtn').addEventListener('click', function(){
       renderSellPrincipleScreen();
       document.getElementById('sellPrincipleScreen').classList.add('open');
-    });
-    document.getElementById('riskIndexRowBtn').addEventListener('click', function(){
-      renderRiskIndexScreen();
-      document.getElementById('riskIndexScreen').classList.add('open');
     });
     document.getElementById('profitRankingRowBtn').addEventListener('click', function(){
       renderProfitRankingScreen();
@@ -6178,10 +6165,6 @@ window.addEventListener('error', function(ev){
     });
     document.getElementById('sellPrincipleBackBtn').addEventListener('click', function(){
       document.getElementById('sellPrincipleScreen').classList.remove('open');
-      renderAssetScreen();
-    });
-    document.getElementById('riskIndexBackBtn').addEventListener('click', function(){
-      document.getElementById('riskIndexScreen').classList.remove('open');
       renderAssetScreen();
     });
     document.getElementById('moodManageRowBtn').addEventListener('click', function(){
