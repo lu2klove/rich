@@ -814,7 +814,7 @@
     gap:8px;
     margin-bottom:8px;
   }
-  .checklist-manage-row .checklistEditInput{
+  .checklist-manage-row .holdQEditInput{
     flex:1;
     min-width:0;
     font-family:'IBM Plex Sans KR',sans-serif;
@@ -824,6 +824,10 @@
     border-radius:8px;
     background:var(--paper);
     color:var(--ink);
+  }
+  .checklist-manage-row .holdQDelBtn{
+    flex-shrink:0;
+    white-space:nowrap;
   }
   .urgentToggleBtn{
     width:38px;
@@ -1367,7 +1371,7 @@
   .chip.selected.sell{background:var(--brick);border-color:var(--brick);}
   .chip.selected.watch{background:var(--olive);border-color:var(--olive);}
 
-  input[type="text"], input[type="date"], input[type="number"], textarea{
+  input[type="text"], input[type="date"], input[type="number"], input[type="password"], textarea{
     width:100%;
     font-family:'IBM Plex Sans KR',sans-serif;
     font-size:14.5px;
@@ -1640,6 +1644,16 @@
     color:var(--ink-soft);
     cursor:pointer;
   }
+  .danger{
+    font-family:'IBM Plex Sans KR',sans-serif;
+    font-size:13px;
+    color:var(--brick);
+    background:var(--brick-soft);
+    border:1px solid var(--brick);
+    border-radius:8px;
+    padding:9px 14px;
+    cursor:pointer;
+  }
   .entry-actions .danger{color:var(--brick);border-color:var(--brick-soft);}
 
   .empty-state{
@@ -1740,7 +1754,7 @@
         <div class="stat-num" id="streakNum">0</div>
         <div class="stat-label">연속 기록</div>
       </div>
-      <div class="stat">
+      <div class="stat" id="monthStatBlock" style="cursor:pointer;">
         <div class="stat-num" id="monthNum">0</div>
         <div class="stat-label">이번달</div>
       </div>
@@ -1760,6 +1774,7 @@
     </div>
     <div class="stampgrid" id="stampgrid"></div>
     <div class="day-detail" id="dayDetail"></div>
+    <div class="day-detail" id="monthEntriesDetail"></div>
   </div>
 
   <div class="entryform-wrap" id="entryFormWrap">
@@ -1888,7 +1903,7 @@
   <div class="asset-header">
     <button class="asset-back" id="investJudgmentBackBtn" type="button">‹ 뒤로</button>
     <span class="asset-title">🧭 투자판단</span>
-    <button class="asset-back" id="manageChecklistBtn" type="button" aria-label="체크리스트 관리">✏️</button>
+    <button class="asset-back" id="manageChecklistBtn" type="button" aria-label="점검항목 관리">✏️</button>
   </div>
   <div class="asset-body">
     <div class="chiprow" id="judgmentTabChips" style="margin-bottom:16px;">
@@ -1903,7 +1918,7 @@
 <div class="asset-screen" id="checklistManageScreen">
   <div class="asset-header">
     <button class="asset-back" id="checklistManageBackBtn" type="button">‹ 뒤로</button>
-    <span class="asset-title">✏️ 체크리스트 관리</span>
+    <span class="asset-title">✏️ 점검항목 관리</span>
     <span style="width:44px;"></span>
   </div>
   <div class="asset-body" id="checklistManageBody"></div>
@@ -3381,13 +3396,13 @@ window.addEventListener('error', function(ev){
   }
 
   var MAJOR_QUOTE_META = [
-    { key:'wti', label:'국제유가(WTI)', unit:'$', thresholdKey:'wti' },
-    { key:'us10y', label:'미국채 10년물', unit:'%', thresholdKey:'us10y' },
-    { key:'us30y', label:'미국채 30년물', unit:'%', thresholdKey:'us30y' },
-    { key:'fx', label:'환율(USD/KRW)', unit:'원', thresholdKey:'fx' },
-    { key:'vix', label:'변동성지수(VIX)', unit:'', thresholdKey:'vix' },
-    { key:'sox', label:'필라델피아반도체지수', unit:'', thresholdKey:null },
-    { key:'btc', label:'비트코인', unit:'$', thresholdKey:null }
+    { key:'wti', label:'국제유가(WTI)', unit:'$', unitPos:'prefix', thresholdKey:'wti' },
+    { key:'us10y', label:'미국채 10년물', unit:'%', unitPos:'suffix', thresholdKey:'us10y' },
+    { key:'us30y', label:'미국채 30년물', unit:'%', unitPos:'suffix', thresholdKey:'us30y' },
+    { key:'fx', label:'환율(USD/KRW)', unit:'원', unitPos:'suffix', thresholdKey:'fx' },
+    { key:'vix', label:'변동성지수(VIX)', unit:'', unitPos:'suffix', thresholdKey:'vix' },
+    { key:'sox', label:'필라델피아반도체지수', unit:'', unitPos:'suffix', thresholdKey:null },
+    { key:'btc', label:'비트코인', unit:'$', unitPos:'prefix', thresholdKey:null }
   ];
   var majorQuoteCache = {};
   async function fetchMajorQuoteData(){
@@ -3612,7 +3627,7 @@ window.addEventListener('error', function(ev){
       }
       html += '<tr>';
       html += '<td>'+idx.label+'</td>';
-      html += '<td>'+(price!=null ? idx.unit+price.toLocaleString(undefined,{maximumFractionDigits:2}) : '-')+'</td>';
+      html += '<td>'+(price!=null ? (idx.unitPos==='prefix' ? idx.unit+price.toLocaleString(undefined,{maximumFractionDigits:2}) : price.toLocaleString(undefined,{maximumFractionDigits:2})+idx.unit) : '-')+'</td>';
       html += '<td>'+(changePct!=null ? '<span style="color:'+(changePct>=0?'var(--brick)':'var(--blue)')+';font-weight:600;">'+(changePct>=0?'+':'-')+Math.abs(changePct).toFixed(1)+'%</span>' : '-')+'</td>';
       html += '<td style="white-space:nowrap;">'+(tier ? '<span style="color:'+tier.color+';font-weight:700;">'+tier.emoji+' '+tier.label+'</span>' : '<span style="color:var(--ink-faint);">-</span>')+'</td>';
       html += '</tr>';
@@ -3765,7 +3780,7 @@ window.addEventListener('error', function(ev){
         html += '</div></div>';
       });
       if(HOLD_CONVICTION_QUESTIONS.length === 0){
-        html += '<p class="empty-inline">등록된 질문이 없어요. 설정 → 체크리스트 관리에서 추가할 수 있어요.</p>';
+        html += '<p class="empty-inline">등록된 질문이 없어요. 설정 → 점검항목 관리에서 추가할 수 있어요.</p>';
       }
 
       html += '<p class="field-label field-label-strong" style="margin-top:20px;">😵 현재 매도하고 싶은 가장 큰 이유</p>';
@@ -4550,7 +4565,7 @@ window.addEventListener('error', function(ev){
     document.getElementById('settingsSheet').classList.remove('open');
     document.getElementById('settingsBackdrop').classList.remove('open');
     document.getElementById('assetScreen').classList.remove('open');
-    document.getElementById('sellChecklistScreen').classList.remove('open');
+    document.getElementById('investJudgmentScreen').classList.remove('open');
     document.getElementById('checklistManageScreen').classList.remove('open');
     document.getElementById('reviewScreen').classList.remove('open');
     var dps = document.getElementById('datePickerSheet');
@@ -5739,6 +5754,96 @@ window.addEventListener('error', function(ev){
     });
   }
 
+  var monthEntriesDetailOpen = false;
+  function renderMonthEntriesDetail(){
+    var panel = document.getElementById('monthEntriesDetail');
+    if(!monthEntriesDetailOpen){
+      panel.style.maxHeight = '0px';
+      return;
+    }
+    var now = new Date();
+    var displayDate = new Date(now.getFullYear(), now.getMonth() + calendarOffset, 1);
+    var y = displayDate.getFullYear(), m = displayDate.getMonth();
+    var monthStart = y+'-'+String(m+1).padStart(2,'0')+'-01';
+    var monthEnd = y+'-'+String(m+1).padStart(2,'0')+'-'+String(new Date(y,m+1,0).getDate()).padStart(2,'0');
+    var monthEntries = entries.filter(function(e){ return e.date >= monthStart && e.date <= monthEnd; })
+      .sort(function(a,b){ return a.date < b.date ? 1 : (a.date > b.date ? -1 : 0); });
+
+    var html = '<div class="day-detail-inner">';
+    html += '<div class="day-detail-head">';
+    html += '<span class="day-detail-date">'+(m+1)+'월 전체 기록 ('+monthEntries.length+'건)</span>';
+    html += '</div>';
+
+    if(monthEntries.length === 0){
+      html += '<p class="empty-inline">이번 달은 아직 기록이 없어요.</p>';
+    }else{
+      monthEntries.forEach(function(entry){
+        var isConfirming = confirmDeleteId === entry.id;
+        html += '<div class="day-entry-item">';
+        html += '<div class="entry-top">';
+        html += '<span class="badge '+entry.type+'">'+typeLabel[entry.type]+'</span>';
+        if(entry.ticker){ html += '<span class="ticker">'+escapeHtml(entry.ticker)+'</span>'; }
+        if(entry.mood){ html += '<span class="mood">'+entry.mood+'</span>'; }
+        html += '<span style="font-size:11.5px;color:var(--ink-faint);margin-left:auto;">'+niceDate(entry.date)+'</span>';
+        html += '</div>';
+        if(entry.quantity || entry.price){
+          html += '<div class="trade-summary">';
+          var parts = [];
+          if(entry.quantity) parts.push(entry.quantity+'주');
+          if(entry.price) parts.push(formatWon(entry.price)+'원');
+          if(entry.totalAmount) parts.push('총 '+formatWon(entry.totalAmount)+'원');
+          html += parts.join(' · ');
+          html += '</div>';
+        }
+        html += '<div class="memo-preview" style="white-space:normal;">'+escapeHtml(entry.memo || '(메모 없음)')+'</div>';
+        html += '<div class="entry-actions">';
+        if(isConfirming){
+          html += '<button class="danger monthConfirmdel" data-id="'+entry.id+'" type="button">정말 삭제</button>';
+          html += '<button class="monthCanceldel" data-id="'+entry.id+'" type="button">취소</button>';
+        }else{
+          html += '<button class="monthEditbtn" data-id="'+entry.id+'" type="button">수정</button>';
+          html += '<button class="danger monthDelbtn" data-id="'+entry.id+'" type="button">삭제</button>';
+        }
+        html += '</div>';
+        html += '</div>';
+      });
+    }
+    html += '</div>';
+    panel.innerHTML = html;
+    panel.style.maxHeight = panel.scrollHeight + 'px';
+
+    panel.querySelectorAll('.monthEditbtn').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var id = btn.getAttribute('data-id');
+        monthEntriesDetailOpen = false;
+        renderMonthEntriesDetail();
+        startEdit(id);
+      });
+    });
+    panel.querySelectorAll('.monthDelbtn').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        confirmDeleteId = btn.getAttribute('data-id');
+        renderMonthEntriesDetail();
+      });
+    });
+    panel.querySelectorAll('.monthCanceldel').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        confirmDeleteId = null;
+        renderMonthEntriesDetail();
+      });
+    });
+    panel.querySelectorAll('.monthConfirmdel').forEach(function(btn){
+      btn.addEventListener('click', async function(){
+        var id = btn.getAttribute('data-id');
+        entries = entries.filter(function(e){ return e.id !== id; });
+        confirmDeleteId = null;
+        await saveEntries();
+        renderAll();
+        renderMonthEntriesDetail();
+      });
+    });
+  }
+
   async function handleSave(){
    try{
     var dateStr = document.getElementById('dateInput').value || todayStr();
@@ -5875,6 +5980,7 @@ window.addEventListener('error', function(ev){
       selectedCalendarDate = null;
       renderStampGrid(false);
       renderDayDetail();
+      renderMonthEntriesDetail();
     });
     document.getElementById('nextMonthBtn').addEventListener('click', function(){
       if(calendarOffset < 0){
@@ -5882,6 +5988,7 @@ window.addEventListener('error', function(ev){
         selectedCalendarDate = null;
         renderStampGrid(false);
         renderDayDetail();
+        renderMonthEntriesDetail();
       }
     });
     document.getElementById('datePickerBackdrop').addEventListener('click', closeDatePicker);
@@ -5908,6 +6015,11 @@ window.addEventListener('error', function(ev){
       selectedCalendarDate = null;
       renderStampGrid(false);
       renderDayDetail();
+      renderMonthEntriesDetail();
+    });
+    document.getElementById('monthStatBlock').addEventListener('click', function(){
+      monthEntriesDetailOpen = !monthEntriesDetailOpen;
+      renderMonthEntriesDetail();
     });
     document.getElementById('stampgrid').addEventListener('click', function(ev){
       var cell = ev.target.closest('.cell[data-date]');
