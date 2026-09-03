@@ -650,6 +650,35 @@
     border-radius:10px;
     padding:14px;
   }
+  .backup-banner{
+    border:1px solid var(--olive);
+    background:var(--olive-soft);
+    border-radius:10px;
+    padding:12px 14px;
+    margin-bottom:16px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+  .backup-banner-text{
+    font-size:13px;
+    color:var(--ink);
+    flex:1;
+    min-width:180px;
+  }
+  .backup-banner-btn{
+    background:var(--ink);
+    color:var(--paper);
+    border:none;
+    border-radius:8px;
+    padding:8px 14px;
+    font-size:13px;
+    font-weight:600;
+    cursor:pointer;
+    white-space:nowrap;
+  }
   .rule-main{
     font-weight:700;
     font-size:14px;
@@ -1748,6 +1777,8 @@
   </div>
   <p class="subtitle">시장을 기록하고, 나를 복기한다</p>
 
+  <div id="backupReminderBanner" style="display:none;"></div>
+
   <div class="card">
     <div class="stats">
       <div class="stat">
@@ -2090,6 +2121,17 @@
   </div>
   <input type="file" id="importFile" accept="application/json" style="display:none;">
   <p class="toast" id="backupToast"></p>
+  <div class="field" style="margin-top:12px;">
+    <span class="field-label">며칠마다 백업 알림을 받을까요?</span>
+    <select id="backupReminderSelect" class="select-pill" style="width:100%;">
+      <option value="0">알림 끄기</option>
+      <option value="3">3일마다</option>
+      <option value="7">7일마다</option>
+      <option value="14">14일마다</option>
+      <option value="30">30일마다</option>
+    </select>
+  </div>
+  <p class="savehint" id="lastBackupInfo"></p>
 
   <p class="card-title" style="margin-top:22px;">🔒 보안</p>
   <button class="cancelbtn" id="changePwBtn" type="button" style="width:100%;">비밀번호 변경</button>
@@ -2252,6 +2294,36 @@ window.addEventListener('error', function(ev){
   }
 
   // ---------- Custom moods ----------
+  var BACKUP_REMINDER_KEY = 'investment:backupreminder';
+  var BACKUP_REMINDER_LOCAL_KEY = 'investment_journal_backupreminder_v1';
+  var backupReminderDays = 7;
+  var lastBackupDate = null;
+  async function loadBackupReminder(){
+    if(hasClaudeStorage()){
+      try{
+        var res = await window.storage.get(BACKUP_REMINDER_KEY, false);
+        return res && res.value ? JSON.parse(res.value) : { days:7, last:null };
+      }catch(e){ return { days:7, last:null }; }
+    }
+    try{
+      var raw = localStorage.getItem(BACKUP_REMINDER_LOCAL_KEY);
+      return raw ? JSON.parse(raw) : { days:7, last:null };
+    }catch(e){ return { days:7, last:null }; }
+  }
+  async function saveBackupReminder(){
+    var data = { days:backupReminderDays, last:lastBackupDate };
+    if(hasClaudeStorage()){
+      try{ await window.storage.set(BACKUP_REMINDER_KEY, JSON.stringify(data), false); }catch(e){}
+      return;
+    }
+    try{ localStorage.setItem(BACKUP_REMINDER_LOCAL_KEY, JSON.stringify(data)); }catch(e){}
+  }
+  function daysSince(dateStr){
+    if(!dateStr) return null;
+    var diff = new Date(todayStr()+'T00:00:00') - new Date(dateStr+'T00:00:00');
+    return Math.round(diff / (1000*60*60*24));
+  }
+
   var CUSTOM_MOODS_KEY = 'journal:custommoods';
   var CUSTOM_MOODS_LOCAL_KEY = 'investment_journal_custommoods_v1';
   var customMoods = []; // [{id, icon, label}]
@@ -6245,10 +6317,34 @@ window.addEventListener('error', function(ev){
    }
   }
 
+  function renderBackupBanner(){
+    var banner = document.getElementById('backupReminderBanner');
+    if(!banner) return;
+    if(!backupReminderDays || backupReminderDays <= 0){
+      banner.style.display = 'none';
+      return;
+    }
+    var since = daysSince(lastBackupDate);
+    if(since == null || since >= backupReminderDays){
+      var msg = lastBackupDate == null ? '아직 백업한 적이 없어요.' : ('마지막 백업 '+since+'일 전이에요.');
+      banner.innerHTML = '<div class="backup-banner">'+
+        '<span class="backup-banner-text">💾 '+msg+' 지금 백업할까요?</span>'+
+        '<button class="backup-banner-btn" id="quickBackupBtn" type="button">백업하기</button>'+
+        '</div>';
+      banner.style.display = 'block';
+      document.getElementById('quickBackupBtn').addEventListener('click', function(){
+        document.getElementById('exportBtn').click();
+      });
+    }else{
+      banner.style.display = 'none';
+    }
+  }
+
   function renderAll(justStampedToday){
     renderStampGrid(justStampedToday);
     renderStats();
     renderDayDetail();
+    renderBackupBanner();
   }
 
   function renderReviewScreen(){
@@ -6408,6 +6504,10 @@ window.addEventListener('error', function(ev){
       t.style.color = 'var(--pine)';
       t.textContent = '백업 파일을 저장했어요';
       setTimeout(function(){ t.textContent=''; }, 2500);
+      lastBackupDate = todayStr();
+      await saveBackupReminder();
+      renderBackupBanner();
+      updateLastBackupInfo();
     });
 
     document.getElementById('importBtn').addEventListener('click', function(){
@@ -6559,15 +6659,32 @@ window.addEventListener('error', function(ev){
       renderTimeline();
     });
 
+    function updateLastBackupInfo(){
+      var el = document.getElementById('lastBackupInfo');
+      if(!el) return;
+      if(lastBackupDate == null){
+        el.textContent = '아직 백업한 적이 없어요.';
+      }else{
+        var since = daysSince(lastBackupDate);
+        el.textContent = '마지막 백업: '+niceDate(lastBackupDate)+' ('+(since===0?'오늘':since+'일 전')+')';
+      }
+    }
     function openSettingsSheet(){
       document.getElementById('settingsBackdrop').classList.add('open');
       document.getElementById('settingsSheet').classList.add('open');
+      document.getElementById('backupReminderSelect').value = String(backupReminderDays);
+      updateLastBackupInfo();
     }
     function closeSettingsSheet(){
       document.getElementById('settingsBackdrop').classList.remove('open');
       document.getElementById('settingsSheet').classList.remove('open');
     }
     document.getElementById('fabSettingsBtn').addEventListener('click', openSettingsSheet);
+    document.getElementById('backupReminderSelect').addEventListener('change', async function(){
+      backupReminderDays = parseInt(this.value, 10);
+      await saveBackupReminder();
+      renderBackupBanner();
+    });
     document.getElementById('assetMgmtBtn').addEventListener('click', function(){
       holdingsPage = 1;
       holdingsFilterAccount = '';
@@ -6665,6 +6782,9 @@ window.addEventListener('error', function(ev){
       cycleState = await loadCycleState();
       vkospiManualValue = await loadVkospiManual();
       mkrHistory = await loadMkrHistory();
+      var backupReminderData = await loadBackupReminder();
+      backupReminderDays = backupReminderData.days != null ? backupReminderData.days : 7;
+      lastBackupDate = backupReminderData.last || null;
       customMoods = await loadCustomMoods();
       renderCustomMoodChips();
       sellChecklistThresholdPct = await loadChecklistThreshold();
