@@ -1732,6 +1732,7 @@
 
   .marketchip{font-family:'IBM Plex Sans KR',sans-serif;}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 </head>
 <body>
 <div id="lockScreen" class="lockscreen">
@@ -1740,24 +1741,28 @@
     <h1 style="margin-bottom:18px;">📝 투자일지</h1>
 
     <div id="setupView" style="display:none;">
-      <p class="field-label">사용할 비밀번호를 정해주세요</p>
-      <input type="password" id="setupPw1" placeholder="비밀번호 (4자 이상)">
-      <input type="password" id="setupPw2" placeholder="비밀번호 확인" style="margin-top:8px;">
+      <p class="field-label">계정을 만들어주세요</p>
+      <input type="email" id="setupEmail" placeholder="이메일" autocomplete="email">
+      <input type="password" id="setupPw1" placeholder="비밀번호 (6자 이상)" style="margin-top:8px;" autocomplete="new-password">
+      <input type="password" id="setupPw2" placeholder="비밀번호 확인" style="margin-top:8px;" autocomplete="new-password">
       <p class="toast" id="setupErr" style="color:var(--brick);"></p>
-      <button class="savebtn" id="setupBtn" type="button" style="width:100%;margin-top:10px;">비밀번호 설정하고 시작</button>
-      <p class="savehint">이 폰이 아닌 다른 곳에서 열면 비밀번호를 새로 설정하게 돼요</p>
+      <button class="savebtn" id="setupBtn" type="button" style="width:100%;margin-top:10px;">계정 만들고 시작</button>
+      <p class="savehint">이 계정으로 PC·모바일 어디서든 같은 기록을 볼 수 있어요</p>
+      <button class="linklike" id="goToLoginBtn" type="button" style="margin-top:14px;">이미 계정이 있어요</button>
     </div>
 
     <div id="loginView" style="display:none;">
-      <p class="field-label">비밀번호를 입력해주세요</p>
-      <input type="password" id="loginPw" placeholder="비밀번호">
+      <p class="field-label">로그인해주세요</p>
+      <input type="email" id="loginEmail" placeholder="이메일" autocomplete="email">
+      <input type="password" id="loginPw" placeholder="비밀번호" style="margin-top:8px;" autocomplete="current-password">
       <p class="toast" id="loginErr" style="color:var(--brick);"></p>
-      <button class="savebtn" id="loginBtn" type="button" style="width:100%;margin-top:10px;">확인</button>
+      <button class="savebtn" id="loginBtn" type="button" style="width:100%;margin-top:10px;">로그인</button>
       <button class="linklike" id="forgotBtn" type="button" style="margin-top:14px;">비밀번호를 잊으셨나요?</button>
       <div id="forgotConfirm" style="display:none;margin-top:8px;">
-        <p class="toast" style="color:var(--brick);">비밀번호를 초기화하면 새로 설정해야 해요. 기록은 그대로 남아있어요.</p>
-        <button class="cancelbtn" id="forgotConfirmBtn" type="button" style="width:100%;">비밀번호 초기화</button>
+        <p class="toast">가입하신 이메일로 비밀번호 재설정 링크를 보내드려요.</p>
+        <button class="cancelbtn" id="forgotConfirmBtn" type="button" style="width:100%;">재설정 메일 보내기</button>
       </div>
+      <button class="linklike" id="goToSetupBtn" type="button" style="margin-top:14px;">계정이 없으신가요? 만들기</button>
     </div>
 
     <p style="text-align:center;margin-top:28px;">
@@ -1777,6 +1782,7 @@
   </div>
   <p class="subtitle">시장을 기록하고, 나를 복기한다</p>
 
+  <div id="syncErrorBanner" style="display:none;background:var(--brick);color:#fff;padding:10px 14px;border-radius:8px;font-size:12.5px;margin-bottom:12px;white-space:pre-wrap;word-break:break-all;"></div>
   <div id="backupReminderBanner" style="display:none;"></div>
 
   <div class="card">
@@ -2165,47 +2171,44 @@ window.addEventListener('error', function(ev){
     return typeof window.storage !== 'undefined' && window.storage && typeof window.storage.get === 'function';
   }
 
-  // ---------- Password lock ----------
-  var PW_KEY = 'journal:pwhash';
-  var PW_LOCAL_KEY = 'investment_journal_pwhash_v1';
+  // ---------- Supabase ----------
+  var SUPABASE_URL = 'https://kcoxuxgkuetktiumssxb.supabase.co';
+  var SUPABASE_ANON_KEY = 'sb_publishable_Hd3naC6mkL_827xKL_Bn_Q_kJqbkQt5';
+  var supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  async function hashPassword(pw){
+  async function getCurrentUserId(){
+    var res = await supabaseClient.auth.getUser();
+    return res.data && res.data.user ? res.data.user.id : null;
+  }
+  function reportSyncError(where, err){
+    var msg = err && err.message ? err.message : String(err);
+    console.error('[Supabase 오류: '+where+']', err);
+    var banner = document.getElementById('syncErrorBanner');
+    if(banner){
+      banner.style.display = 'block';
+      banner.textContent = '⚠️ 동기화 오류 ('+where+'): ' + msg;
+    }
+  }
+  var settingsCache = {};
+  var settingsCacheLoaded = false;
+  async function ensureSettingsCacheLoaded(){
+    if(settingsCacheLoaded) return;
     try{
-      if(window.crypto && window.crypto.subtle){
-        var enc = new TextEncoder().encode(pw);
-        var buf = await window.crypto.subtle.digest('SHA-256', enc);
-        return Array.from(new Uint8Array(buf)).map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
-      }
-    }catch(e){}
-    var h = 0;
-    for(var i=0;i<pw.length;i++){ h = ((h<<5)-h + pw.charCodeAt(i))|0; }
-    return 'fb' + Math.abs(h).toString(16);
+      var uid = await getCurrentUserId();
+      if(!uid){ reportSyncError('설정 불러오기', '로그인 세션을 찾을 수 없어요'); settingsCacheLoaded = true; return; }
+      var res = await supabaseClient.from('user_settings').select('settings').eq('user_id', uid).maybeSingle();
+      if(res.error){ reportSyncError('설정 불러오기', res.error); }
+      settingsCache = (!res.error && res.data && res.data.settings) ? res.data.settings : {};
+    }catch(e){ reportSyncError('설정 불러오기', e); settingsCache = {}; }
+    settingsCacheLoaded = true;
   }
-
-  async function getStoredHash(){
-    if(hasClaudeStorage()){
-      try{
-        var res = await window.storage.get(PW_KEY, false);
-        return (res && res.value) ? res.value : null;
-      }catch(e){ return null; }
-    }
-    try{ return localStorage.getItem(PW_LOCAL_KEY); }catch(e){ return null; }
-  }
-
-  async function setStoredHash(hash){
-    if(hasClaudeStorage()){
-      try{ await window.storage.set(PW_KEY, hash, false); }catch(e){}
-      return;
-    }
-    try{ localStorage.setItem(PW_LOCAL_KEY, hash); }catch(e){}
-  }
-
-  async function clearStoredHash(){
-    if(hasClaudeStorage()){
-      try{ await window.storage.delete(PW_KEY, false); }catch(e){}
-      return;
-    }
-    try{ localStorage.removeItem(PW_LOCAL_KEY); }catch(e){}
+  async function persistSettingsBlob(){
+    try{
+      var uid = await getCurrentUserId();
+      if(!uid){ reportSyncError('설정 저장', '로그인 세션을 찾을 수 없어요'); return; }
+      var res = await supabaseClient.from('user_settings').upsert({ user_id: uid, settings: settingsCache, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+      if(res.error) reportSyncError('설정 저장', res.error);
+    }catch(e){ reportSyncError('설정 저장', e); }
   }
 
   // ---------- Font preference ----------
@@ -2296,24 +2299,12 @@ window.addEventListener('error', function(ev){
   var backupReminderDays = 7;
   var lastBackupDate = null;
   async function loadBackupReminder(){
-    if(hasClaudeStorage()){
-      try{
-        var res = await window.storage.get(BACKUP_REMINDER_KEY, false);
-        return res && res.value ? JSON.parse(res.value) : { days:7, last:null };
-      }catch(e){ return { days:7, last:null }; }
-    }
-    try{
-      var raw = localStorage.getItem(BACKUP_REMINDER_LOCAL_KEY);
-      return raw ? JSON.parse(raw) : { days:7, last:null };
-    }catch(e){ return { days:7, last:null }; }
+    await ensureSettingsCacheLoaded();
+    return settingsCache.backupReminder || { days:7, last:null };
   }
   async function saveBackupReminder(){
-    var data = { days:backupReminderDays, last:lastBackupDate };
-    if(hasClaudeStorage()){
-      try{ await window.storage.set(BACKUP_REMINDER_KEY, JSON.stringify(data), false); }catch(e){}
-      return;
-    }
-    try{ localStorage.setItem(BACKUP_REMINDER_LOCAL_KEY, JSON.stringify(data)); }catch(e){}
+    settingsCache.backupReminder = { days:backupReminderDays, last:lastBackupDate };
+    await persistSettingsBlob();
   }
   function daysSince(dateStr){
     if(!dateStr) return null;
@@ -2321,29 +2312,15 @@ window.addEventListener('error', function(ev){
     return Math.round(diff / (1000*60*60*24));
   }
 
-  var CUSTOM_MOODS_KEY = 'journal:custommoods';
-  var CUSTOM_MOODS_LOCAL_KEY = 'investment_journal_custommoods_v1';
   var customMoods = []; // [{id, icon, label}]
 
   async function loadCustomMoods(){
-    if(hasClaudeStorage()){
-      try{
-        var res = await window.storage.get(CUSTOM_MOODS_KEY, false);
-        if(res && res.value) return JSON.parse(res.value);
-        return [];
-      }catch(e){ return []; }
-    }
-    try{
-      var raw = localStorage.getItem(CUSTOM_MOODS_LOCAL_KEY);
-      return raw ? JSON.parse(raw) : [];
-    }catch(e){ return []; }
+    await ensureSettingsCacheLoaded();
+    return settingsCache.customMoods || [];
   }
   async function saveCustomMoods(){
-    if(hasClaudeStorage()){
-      try{ await window.storage.set(CUSTOM_MOODS_KEY, JSON.stringify(customMoods), false); }catch(e){}
-      return;
-    }
-    try{ localStorage.setItem(CUSTOM_MOODS_LOCAL_KEY, JSON.stringify(customMoods)); }catch(e){}
+    settingsCache.customMoods = customMoods;
+    await persistSettingsBlob();
   }
   var sizePref = '100';
 
@@ -2400,24 +2377,12 @@ window.addEventListener('error', function(ev){
   var accounts = []; // [{id, name}]
 
   async function loadAccounts(){
-    if(hasClaudeStorage()){
-      try{
-        var res = await window.storage.get(ACCOUNTS_KEY, false);
-        if(res && res.value) return JSON.parse(res.value);
-        return [];
-      }catch(e){ return []; }
-    }
-    try{
-      var raw = localStorage.getItem(ACCOUNTS_LOCAL_KEY);
-      return raw ? JSON.parse(raw) : [];
-    }catch(e){ return []; }
+    await ensureSettingsCacheLoaded();
+    return settingsCache.accounts || [];
   }
   async function saveAccounts(){
-    if(hasClaudeStorage()){
-      try{ await window.storage.set(ACCOUNTS_KEY, JSON.stringify(accounts), false); }catch(e){}
-      return;
-    }
-    try{ localStorage.setItem(ACCOUNTS_LOCAL_KEY, JSON.stringify(accounts)); }catch(e){}
+    settingsCache.accounts = accounts;
+    await persistSettingsBlob();
   }
 
   var SELL_KEY = 'journal:sellsettings';
@@ -2425,25 +2390,12 @@ window.addEventListener('error', function(ev){
   var sellSettings = { stopLossPct:10, takeProfitPct:15 };
 
   async function loadSellSettings(){
-    var fallback = { stopLossPct:10, takeProfitPct:15 };
-    if(hasClaudeStorage()){
-      try{
-        var res = await window.storage.get(SELL_KEY, false);
-        if(res && res.value) return JSON.parse(res.value);
-        return fallback;
-      }catch(e){ return fallback; }
-    }
-    try{
-      var raw = localStorage.getItem(SELL_LOCAL_KEY);
-      return raw ? JSON.parse(raw) : fallback;
-    }catch(e){ return fallback; }
+    await ensureSettingsCacheLoaded();
+    return settingsCache.sellSettings || { stopLossPct:10, takeProfitPct:15 };
   }
   async function saveSellSettings(){
-    if(hasClaudeStorage()){
-      try{ await window.storage.set(SELL_KEY, JSON.stringify(sellSettings), false); }catch(e){}
-      return;
-    }
-    try{ localStorage.setItem(SELL_LOCAL_KEY, JSON.stringify(sellSettings)); }catch(e){}
+    settingsCache.sellSettings = sellSettings;
+    await persistSettingsBlob();
   }
 
   var portfolioViewMode = 'category'; // 'category' | 'account'
@@ -2479,75 +2431,34 @@ window.addEventListener('error', function(ev){
   var CHECKLIST_ITEMS_LOCAL_KEY = 'investment_journal_checklistitems_v1';
 
   async function loadChecklistItems(){
-    var raw = null;
-    if(hasClaudeStorage()){
-      try{
-        var res = await window.storage.get(CHECKLIST_ITEMS_KEY, false);
-        raw = (res && res.value) ? res.value : null;
-      }catch(e){ raw = null; }
-    }else{
-      try{ raw = localStorage.getItem(CHECKLIST_ITEMS_LOCAL_KEY); }catch(e){ raw = null; }
-    }
-    if(raw){
-      try{ return JSON.parse(raw); }catch(e){}
-    }
-    return makeDefaultChecklistItems();
+    await ensureSettingsCacheLoaded();
+    return settingsCache.checklistItems || makeDefaultChecklistItems();
   }
   async function saveChecklistItems(){
-    if(hasClaudeStorage()){
-      try{ await window.storage.set(CHECKLIST_ITEMS_KEY, JSON.stringify(checklistItems), false); }catch(e){}
-      return;
-    }
-    try{ localStorage.setItem(CHECKLIST_ITEMS_LOCAL_KEY, JSON.stringify(checklistItems)); }catch(e){}
+    settingsCache.checklistItems = checklistItems;
+    await persistSettingsBlob();
   }
 
-  var CHECKLIST_THRESHOLD_KEY = 'journal:checklistthreshold';
-  var CHECKLIST_THRESHOLD_LOCAL_KEY = 'investment_journal_checklistthreshold_v1';
   var sellChecklistThresholdPct = 70;
 
   async function loadChecklistThreshold(){
-    if(hasClaudeStorage()){
-      try{
-        var res = await window.storage.get(CHECKLIST_THRESHOLD_KEY, false);
-        return (res && res.value) ? parseFloat(res.value) : 70;
-      }catch(e){ return 70; }
-    }
-    try{
-      var raw = localStorage.getItem(CHECKLIST_THRESHOLD_LOCAL_KEY);
-      return raw ? parseFloat(raw) : 70;
-    }catch(e){ return 70; }
+    await ensureSettingsCacheLoaded();
+    return (settingsCache.checklistThresholdPct != null) ? settingsCache.checklistThresholdPct : 70;
   }
   async function saveChecklistThreshold(){
-    if(hasClaudeStorage()){
-      try{ await window.storage.set(CHECKLIST_THRESHOLD_KEY, String(sellChecklistThresholdPct), false); }catch(e){}
-      return;
-    }
-    try{ localStorage.setItem(CHECKLIST_THRESHOLD_LOCAL_KEY, String(sellChecklistThresholdPct)); }catch(e){}
+    settingsCache.checklistThresholdPct = sellChecklistThresholdPct;
+    await persistSettingsBlob();
   }
 
-  var INDEXDATA_KEY = 'journal:indexdata';
-  var INDEXDATA_LOCAL_KEY = 'investment_journal_indexdata_v1';
   var indexData = {}; // { kospi: {high, current}, ... }
 
   async function loadIndexData(){
-    if(hasClaudeStorage()){
-      try{
-        var res = await window.storage.get(INDEXDATA_KEY, false);
-        if(res && res.value) return JSON.parse(res.value);
-        return {};
-      }catch(e){ return {}; }
-    }
-    try{
-      var raw = localStorage.getItem(INDEXDATA_LOCAL_KEY);
-      return raw ? JSON.parse(raw) : {};
-    }catch(e){ return {}; }
+    await ensureSettingsCacheLoaded();
+    return settingsCache.indexData || {};
   }
   async function saveIndexData(){
-    if(hasClaudeStorage()){
-      try{ await window.storage.set(INDEXDATA_KEY, JSON.stringify(indexData), false); }catch(e){}
-      return;
-    }
-    try{ localStorage.setItem(INDEXDATA_LOCAL_KEY, JSON.stringify(indexData)); }catch(e){}
+    settingsCache.indexData = indexData;
+    await persistSettingsBlob();
   }
 
   var selectedIndexKey = null;
@@ -2598,24 +2509,12 @@ window.addEventListener('error', function(ev){
   var HOLD_QUESTIONS_LOCAL_KEY = 'investment_journal_holdquestions_v1';
   var HOLD_CONVICTION_QUESTIONS = makeDefaultHoldQuestions();
   async function loadHoldQuestions(){
-    if(hasClaudeStorage()){
-      try{
-        var res = await window.storage.get(HOLD_QUESTIONS_KEY, false);
-        if(res && res.value) return JSON.parse(res.value);
-        return makeDefaultHoldQuestions();
-      }catch(e){ return makeDefaultHoldQuestions(); }
-    }
-    try{
-      var raw = localStorage.getItem(HOLD_QUESTIONS_LOCAL_KEY);
-      return raw ? JSON.parse(raw) : makeDefaultHoldQuestions();
-    }catch(e){ return makeDefaultHoldQuestions(); }
+    await ensureSettingsCacheLoaded();
+    return settingsCache.holdConvictionQuestions || makeDefaultHoldQuestions();
   }
   async function saveHoldQuestions(){
-    if(hasClaudeStorage()){
-      try{ await window.storage.set(HOLD_QUESTIONS_KEY, JSON.stringify(HOLD_CONVICTION_QUESTIONS), false); }catch(e){}
-      return;
-    }
-    try{ localStorage.setItem(HOLD_QUESTIONS_LOCAL_KEY, JSON.stringify(HOLD_CONVICTION_QUESTIONS)); }catch(e){}
+    settingsCache.holdConvictionQuestions = HOLD_CONVICTION_QUESTIONS;
+    await persistSettingsBlob();
   }
 
   // ---------- 상승 사이클 감지 ----------
@@ -2663,24 +2562,12 @@ window.addEventListener('error', function(ev){
     }
   }
   async function loadCycleState(){
-    if(hasClaudeStorage()){
-      try{
-        var res = await window.storage.get(CYCLE_STATE_KEY, false);
-        if(res && res.value) return Object.assign({stage:null,signals:{},note:''}, JSON.parse(res.value));
-        return { stage:null, signals:{}, note:'' };
-      }catch(e){ return { stage:null, signals:{}, note:'' }; }
-    }
-    try{
-      var raw = localStorage.getItem(CYCLE_STATE_LOCAL_KEY);
-      return raw ? Object.assign({stage:null,signals:{},note:''}, JSON.parse(raw)) : { stage:null, signals:{}, note:'' };
-    }catch(e){ return { stage:null, signals:{}, note:'' }; }
+    await ensureSettingsCacheLoaded();
+    return Object.assign({stage:null,signals:{},note:''}, settingsCache.cycleState || {});
   }
   async function saveCycleState(){
-    if(hasClaudeStorage()){
-      try{ await window.storage.set(CYCLE_STATE_KEY, JSON.stringify(cycleState), false); }catch(e){}
-      return;
-    }
-    try{ localStorage.setItem(CYCLE_STATE_LOCAL_KEY, JSON.stringify(cycleState)); }catch(e){}
+    settingsCache.cycleState = cycleState;
+    await persistSettingsBlob();
   }
   function countWarningSignals(){
     return TOP_WARNING_SIGNALS.filter(function(s){ return !!cycleState.signals[s.id]; }).length;
@@ -2789,24 +2676,12 @@ window.addEventListener('error', function(ev){
 
 
   async function loadTickerRegistry(){
-    if(hasClaudeStorage()){
-      try{
-        var res = await window.storage.get(REGISTRY_KEY, false);
-        if(res && res.value) return JSON.parse(res.value);
-        return [];
-      }catch(e){ return []; }
-    }
-    try{
-      var raw = localStorage.getItem(REGISTRY_LOCAL_KEY);
-      return raw ? JSON.parse(raw) : [];
-    }catch(e){ return []; }
+    await ensureSettingsCacheLoaded();
+    return settingsCache.tickerRegistry || [];
   }
   async function saveTickerRegistry(){
-    if(hasClaudeStorage()){
-      try{ await window.storage.set(REGISTRY_KEY, JSON.stringify(tickerRegistry), false); }catch(e){}
-      return;
-    }
-    try{ localStorage.setItem(REGISTRY_LOCAL_KEY, JSON.stringify(tickerRegistry)); }catch(e){}
+    settingsCache.tickerRegistry = tickerRegistry;
+    await persistSettingsBlob();
   }
   function getTickerCategory(ticker){
     var found = tickerRegistry.find(function(t){ return t.ticker === ticker; });
@@ -2902,24 +2777,12 @@ window.addEventListener('error', function(ev){
   }
 
   async function loadCurrentPrices(){
-    if(hasClaudeStorage()){
-      try{
-        var res = await window.storage.get(PRICES_KEY, false);
-        if(res && res.value) return JSON.parse(res.value);
-        return {};
-      }catch(e){ return {}; }
-    }
-    try{
-      var raw = localStorage.getItem(PRICES_LOCAL_KEY);
-      return raw ? JSON.parse(raw) : {};
-    }catch(e){ return {}; }
+    await ensureSettingsCacheLoaded();
+    return settingsCache.currentPrices || {};
   }
   async function saveCurrentPrices(){
-    if(hasClaudeStorage()){
-      try{ await window.storage.set(PRICES_KEY, JSON.stringify(currentPrices), false); }catch(e){}
-      return;
-    }
-    try{ localStorage.setItem(PRICES_LOCAL_KEY, JSON.stringify(currentPrices)); }catch(e){}
+    settingsCache.currentPrices = currentPrices;
+    await persistSettingsBlob();
   }
 
   function getKnownTickers(){
@@ -2966,25 +2829,13 @@ window.addEventListener('error', function(ev){
   }
 
   async function loadOtherAssets(){
-    if(hasClaudeStorage()){
-      try{
-        var res = await window.storage.get(OTHER_KEY, false);
-        if(res && res.value) return JSON.parse(res.value);
-        return [];
-      }catch(e){ return []; }
-    }
-    try{
-      var raw = localStorage.getItem(OTHER_LOCAL_KEY);
-      return raw ? JSON.parse(raw) : [];
-    }catch(e){ return []; }
+    await ensureSettingsCacheLoaded();
+    return settingsCache.otherAssets || [];
   }
 
   async function saveOtherAssets(){
-    if(hasClaudeStorage()){
-      try{ await window.storage.set(OTHER_KEY, JSON.stringify(otherAssets), false); }catch(e){}
-      return;
-    }
-    try{ localStorage.setItem(OTHER_LOCAL_KEY, JSON.stringify(otherAssets)); }catch(e){}
+    settingsCache.otherAssets = otherAssets;
+    await persistSettingsBlob();
   }
 
   function computeRealizedPLMap(){
@@ -3451,24 +3302,12 @@ window.addEventListener('error', function(ev){
   var riskThresholds = { wti:0, us10y:0, us30y:0, fx:0, vix:0 };
 
   async function loadRiskThresholds(){
-    if(hasClaudeStorage()){
-      try{
-        var res = await window.storage.get(RISK_INDEX_KEY, false);
-        if(res && res.value) return Object.assign({wti:0,us10y:0,us30y:0,fx:0,vix:0}, JSON.parse(res.value));
-        return { wti:0, us10y:0, us30y:0, fx:0 };
-      }catch(e){ return { wti:0, us10y:0, us30y:0, fx:0 }; }
-    }
-    try{
-      var raw = localStorage.getItem(RISK_INDEX_LOCAL_KEY);
-      return raw ? Object.assign({wti:0,us10y:0,us30y:0,fx:0,vix:0}, JSON.parse(raw)) : { wti:0, us10y:0, us30y:0, fx:0, vix:0 };
-    }catch(e){ return { wti:0, us10y:0, us30y:0, fx:0 }; }
+    await ensureSettingsCacheLoaded();
+    return Object.assign({wti:0,us10y:0,us30y:0,fx:0,vix:0}, settingsCache.riskThresholds || {});
   }
   async function saveRiskThresholds(){
-    if(hasClaudeStorage()){
-      try{ await window.storage.set(RISK_INDEX_KEY, JSON.stringify(riskThresholds), false); }catch(e){}
-      return;
-    }
-    try{ localStorage.setItem(RISK_INDEX_LOCAL_KEY, JSON.stringify(riskThresholds)); }catch(e){}
+    settingsCache.riskThresholds = riskThresholds;
+    await persistSettingsBlob();
   }
 
   var VIX_BANDS = [
@@ -3600,23 +3439,12 @@ window.addEventListener('error', function(ev){
   var MKR_HISTORY_LOCAL_KEY = 'investment_journal_mkrhistory_v1';
   var mkrHistory = []; // [{date, vkospi, kospi, kosdaq}]
   async function loadMkrHistory(){
-    if(hasClaudeStorage()){
-      try{
-        var res = await window.storage.get(MKR_HISTORY_KEY, false);
-        return (res && res.value) ? JSON.parse(res.value) : [];
-      }catch(e){ return []; }
-    }
-    try{
-      var raw = localStorage.getItem(MKR_HISTORY_LOCAL_KEY);
-      return raw ? JSON.parse(raw) : [];
-    }catch(e){ return []; }
+    await ensureSettingsCacheLoaded();
+    return settingsCache.mkrHistory || [];
   }
   async function saveMkrHistory(){
-    if(hasClaudeStorage()){
-      try{ await window.storage.set(MKR_HISTORY_KEY, JSON.stringify(mkrHistory), false); }catch(e){}
-      return;
-    }
-    try{ localStorage.setItem(MKR_HISTORY_LOCAL_KEY, JSON.stringify(mkrHistory)); }catch(e){}
+    settingsCache.mkrHistory = mkrHistory;
+    await persistSettingsBlob();
   }
   async function recordMkrSnapshot(vkospi, kospi, kosdaq){
     if(vkospi == null || kospi == null || kosdaq == null) return;
@@ -3675,23 +3503,12 @@ window.addEventListener('error', function(ev){
   var VKOSPI_MANUAL_LOCAL_KEY = 'investment_journal_vkospimanual_v1';
   var vkospiManualValue = null;
   async function loadVkospiManual(){
-    if(hasClaudeStorage()){
-      try{
-        var res = await window.storage.get(VKOSPI_MANUAL_KEY, false);
-        return (res && res.value) ? parseFloat(res.value) : null;
-      }catch(e){ return null; }
-    }
-    try{
-      var raw = localStorage.getItem(VKOSPI_MANUAL_LOCAL_KEY);
-      return raw ? parseFloat(raw) : null;
-    }catch(e){ return null; }
+    await ensureSettingsCacheLoaded();
+    return (settingsCache.vkospiManual != null) ? settingsCache.vkospiManual : null;
   }
   async function saveVkospiManual(){
-    if(hasClaudeStorage()){
-      try{ await window.storage.set(VKOSPI_MANUAL_KEY, String(vkospiManualValue), false); }catch(e){}
-      return;
-    }
-    try{ localStorage.setItem(VKOSPI_MANUAL_LOCAL_KEY, String(vkospiManualValue)); }catch(e){}
+    settingsCache.vkospiManual = vkospiManualValue;
+    await persistSettingsBlob();
   }
   async function fetchMajorQuoteData(){
     for(var i=0; i<MAJOR_QUOTE_META.length; i++){
@@ -4894,14 +4711,6 @@ window.addEventListener('error', function(ev){
     });
   }
 
-  function showSetupView(){
-    document.getElementById('setupView').style.display = 'block';
-    document.getElementById('loginView').style.display = 'none';
-    document.getElementById('setupPw1').value = '';
-    document.getElementById('setupPw2').value = '';
-    document.getElementById('setupErr').textContent = '';
-  }
-
   var lockResolve = null;
 
   function unlockApp(){
@@ -4909,33 +4718,59 @@ window.addEventListener('error', function(ev){
     if(lockResolve){ lockResolve(); lockResolve = null; }
   }
 
-  async function attemptLogin(){
-    var hash = await getStoredHash();
-    var pw = document.getElementById('loginPw').value;
-    var err = document.getElementById('loginErr');
-    var h = await hashPassword(pw);
-    if(hash && h === hash){
-      unlockApp();
-    }else{
-      err.textContent = '비밀번호가 틀렸어요';
-      document.getElementById('loginPw').value = '';
-    }
+  function showSetupView(){
+    document.getElementById('setupView').style.display = 'block';
+    document.getElementById('loginView').style.display = 'none';
+    document.getElementById('setupEmail').value = '';
+    document.getElementById('setupPw1').value = '';
+    document.getElementById('setupPw2').value = '';
+    document.getElementById('setupErr').textContent = '';
+  }
+  function showLoginView(){
+    document.getElementById('setupView').style.display = 'none';
+    document.getElementById('loginView').style.display = 'block';
   }
 
-  async function doSetupSubmit(){
-    var p1 = document.getElementById('setupPw1').value;
-    var p2 = document.getElementById('setupPw2').value;
-    var err = document.getElementById('setupErr');
-    if(p1.length < 4){ err.textContent = '4자 이상 입력해주세요'; return; }
-    if(p1 !== p2){ err.textContent = '두 비밀번호가 서로 달라요'; return; }
-    var h = await hashPassword(p1);
-    await setStoredHash(h);
+  async function attemptLogin(){
+    var email = document.getElementById('loginEmail').value.trim();
+    var pw = document.getElementById('loginPw').value;
+    var err = document.getElementById('loginErr');
+    err.style.color = 'var(--brick)';
+    err.textContent = '';
+    if(!email || !pw){ err.textContent = '이메일과 비밀번호를 입력해주세요'; return; }
+    var res = await supabaseClient.auth.signInWithPassword({ email: email, password: pw });
+    if(res.error){
+      err.textContent = (res.error.message === 'Invalid login credentials') ? '이메일 또는 비밀번호가 틀렸어요' : res.error.message;
+      return;
+    }
     unlockApp();
   }
 
+  async function doSetupSubmit(){
+    var email = document.getElementById('setupEmail').value.trim();
+    var p1 = document.getElementById('setupPw1').value;
+    var p2 = document.getElementById('setupPw2').value;
+    var err = document.getElementById('setupErr');
+    err.style.color = 'var(--brick)';
+    err.textContent = '';
+    if(!email){ err.textContent = '이메일을 입력해주세요'; return; }
+    if(p1.length < 6){ err.textContent = '비밀번호는 6자 이상이어야 해요'; return; }
+    if(p1 !== p2){ err.textContent = '두 비밀번호가 서로 달라요'; return; }
+    var res = await supabaseClient.auth.signUp({ email: email, password: p1 });
+    if(res.error){
+      err.textContent = res.error.message;
+      return;
+    }
+    if(res.data.session){
+      unlockApp();
+    }else{
+      err.style.color = 'var(--pine)';
+      err.textContent = '가입 확인 메일을 보냈어요. 메일함에서 링크를 눌러 인증한 뒤 로그인해주세요.';
+    }
+  }
+
   function wireLoginHandlers(){
-    document.getElementById('setupView').style.display = 'none';
-    document.getElementById('loginView').style.display = 'block';
+    showLoginView();
     document.getElementById('loginBtn').onclick = attemptLogin;
     document.getElementById('loginPw').onkeydown = function(ev){
       if(ev.key === 'Enter') attemptLogin();
@@ -4945,15 +4780,24 @@ window.addEventListener('error', function(ev){
       box.style.display = (box.style.display === 'none') ? 'block' : 'none';
     };
     document.getElementById('forgotConfirmBtn').onclick = async function(){
-      await clearStoredHash();
-      document.getElementById('forgotConfirm').style.display = 'none';
+      var email = document.getElementById('loginEmail').value.trim();
+      if(!email){
+        document.getElementById('loginErr').textContent = '이메일을 먼저 입력해주세요';
+        return;
+      }
+      await supabaseClient.auth.resetPasswordForEmail(email);
+      document.getElementById('forgotConfirm').innerHTML = '<p class="toast" style="color:var(--pine);">재설정 메일을 보냈어요. 메일함을 확인해주세요.</p>';
+    };
+    document.getElementById('goToSetupBtn').onclick = function(){
       showSetupView();
       document.getElementById('setupBtn').onclick = doSetupSubmit;
     };
   }
 
-  function logout(){
+  async function logout(){
+    await supabaseClient.auth.signOut();
     wireLoginHandlers();
+    document.getElementById('loginEmail').value = '';
     document.getElementById('loginPw').value = '';
     document.getElementById('loginErr').textContent = '';
     document.getElementById('forgotConfirm').style.display = 'none';
@@ -4973,13 +4817,14 @@ window.addEventListener('error', function(ev){
   function initLock(){
     return new Promise(function(resolve){
       lockResolve = resolve;
-
-      getStoredHash().then(function(hash){
-        if(!hash){
-          showSetupView();
-          document.getElementById('setupBtn').onclick = doSetupSubmit;
+      supabaseClient.auth.getSession().then(function(res){
+        if(res.data && res.data.session){
+          unlockApp();
         }else{
           wireLoginHandlers();
+          document.getElementById('goToLoginBtn').onclick = function(){
+            wireLoginHandlers();
+          };
         }
       });
     });
@@ -5189,70 +5034,74 @@ window.addEventListener('error', function(ev){
     sel.innerHTML = html;
   }
 
+  function entryRowToObject(row){
+    return Object.assign({
+      id: row.id,
+      type: row.type,
+      date: row.date,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    }, row.data || {});
+  }
+  function entryObjectToRow(obj, userId){
+    var rest = Object.assign({}, obj);
+    delete rest.id; delete rest.type; delete rest.date; delete rest.createdAt; delete rest.updatedAt;
+    return {
+      id: obj.id,
+      user_id: userId,
+      type: obj.type,
+      date: obj.date,
+      data: rest,
+      updated_at: obj.updatedAt || new Date().toISOString()
+    };
+  }
   async function loadEntries(){
-    if(hasClaudeStorage()){
-      storageMode = 'claude';
-      try{
-        var res = await window.storage.get(STORAGE_KEY, false);
-        if(res && res.value){
-          return JSON.parse(res.value);
-        }
-        return [];
-      }catch(e){
-        return [];
-      }
-    }
-    storageMode = 'local';
     try{
-      var raw = localStorage.getItem(LOCAL_KEY);
-      return raw ? JSON.parse(raw) : [];
-    }catch(e){
-      storageAvailable = false;
-      return [];
-    }
+      var uid = await getCurrentUserId();
+      if(!uid){ reportSyncError('entries 불러오기', '로그인 세션을 찾을 수 없어요'); return []; }
+      var res = await supabaseClient.from('entries').select('*').eq('user_id', uid).order('date');
+      if(res.error){ reportSyncError('entries 불러오기', res.error); return []; }
+      storageAvailable = true;
+      updatePersistNote();
+      return res.data.map(entryRowToObject);
+    }catch(e){ reportSyncError('entries 불러오기', e); return []; }
   }
 
   function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
 
   async function saveEntries(){
-    if(storageMode === 'local'){
-      try{
-        localStorage.setItem(LOCAL_KEY, JSON.stringify(entries));
-        storageAvailable = true;
-        updatePersistNote();
-      }catch(e){
-        storageAvailable = false;
-        updatePersistNote();
-        var box = document.getElementById('errBox');
-        if(box) box.textContent = '저장 오류: ' + (e && e.message ? e.message : e);
-      }
-      return;
-    }
-
-    if(!hasClaudeStorage()){
-      storageAvailable = false;
-      updatePersistNote();
-      return;
-    }
-    var lastErr = null;
-    for(var attempt=0; attempt<3; attempt++){
-      try{
-        var res = await window.storage.set(STORAGE_KEY, JSON.stringify(entries), false);
-        if(res){
-          storageAvailable = true;
+    try{
+      var uid = await getCurrentUserId();
+      if(!uid){ reportSyncError('entries 저장', '로그인 세션을 찾을 수 없어요'); return; }
+      var rows = entries.map(function(e){ return entryObjectToRow(e, uid); });
+      if(rows.length > 0){
+        var upsertRes = await supabaseClient.from('entries').upsert(rows, { onConflict: 'id' });
+        if(upsertRes.error){
+          reportSyncError('entries 저장', upsertRes.error);
+          storageAvailable = false;
           updatePersistNote();
           return;
         }
-        lastErr = '빈 응답';
-      }catch(e){
-        lastErr = e;
       }
-      await sleep(attempt === 0 ? 350 : 900);
+      var existingRes = await supabaseClient.from('entries').select('id').eq('user_id', uid);
+      if(existingRes.error){
+        reportSyncError('entries 조회(삭제 처리용)', existingRes.error);
+      }else{
+        var currentIds = {};
+        entries.forEach(function(e){ currentIds[e.id] = true; });
+        var idsToDelete = existingRes.data.filter(function(r){ return !currentIds[r.id]; }).map(function(r){ return r.id; });
+        if(idsToDelete.length > 0){
+          var delRes = await supabaseClient.from('entries').delete().in('id', idsToDelete);
+          if(delRes.error) reportSyncError('entries 삭제', delRes.error);
+        }
+      }
+      storageAvailable = true;
+      updatePersistNote();
+    }catch(e){
+      reportSyncError('entries 저장', e);
+      storageAvailable = false;
+      updatePersistNote();
     }
-    storageAvailable = false;
-    updatePersistNote();
-    var box = document.getElementById('errBox');
-    if(box) box.textContent = '저장 오류: ' + (lastErr && lastErr.message ? lastErr.message : lastErr);
   }
 
   function updatePersistNote(){
@@ -6468,7 +6317,6 @@ window.addEventListener('error', function(ev){
     });
 
     document.getElementById('exportBtn').addEventListener('click', async function(){
-      var passwordHash = await getStoredHash();
       var data = {
         entries: entries,
         accounts: accounts,
@@ -6483,10 +6331,9 @@ window.addEventListener('error', function(ev){
         otherAssets: otherAssets,
         indexData: indexData,
         riskThresholds: riskThresholds,
-        passwordHash: passwordHash,
         exportedAt: new Date().toISOString(),
         app: 'investment-journal',
-        version: 2
+        version: 3
       };
       var blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
       var url = URL.createObjectURL(blob);
@@ -6581,10 +6428,6 @@ window.addEventListener('error', function(ev){
               await saveRiskThresholds();
               restoredParts.push('지수관리');
             }
-            if(imported.passwordHash){
-              await setStoredHash(imported.passwordHash);
-              restoredParts.push('비밀번호');
-            }
           }
 
           renderAll(false);
@@ -6614,10 +6457,14 @@ window.addEventListener('error', function(ev){
       var p1 = document.getElementById('newPw1').value;
       var p2 = document.getElementById('newPw2').value;
       var t = document.getElementById('pwToast');
-      if(p1.length < 4){ t.style.color = 'var(--brick)'; t.textContent = '4자 이상 입력해주세요'; return; }
+      if(p1.length < 6){ t.style.color = 'var(--brick)'; t.textContent = '비밀번호는 6자 이상이어야 해요'; return; }
       if(p1 !== p2){ t.style.color = 'var(--brick)'; t.textContent = '두 비밀번호가 서로 달라요'; return; }
-      var h = await hashPassword(p1);
-      await setStoredHash(h);
+      var res = await supabaseClient.auth.updateUser({ password: p1 });
+      if(res.error){
+        t.style.color = 'var(--brick)';
+        t.textContent = res.error.message;
+        return;
+      }
       t.style.color = 'var(--pine)';
       t.textContent = '비밀번호가 변경됐어요';
       setTimeout(function(){
