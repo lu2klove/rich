@@ -1041,7 +1041,7 @@
     vertical-align:-2px;
     margin-right:4px;
   }
-  .lockcard input[type="password"]{
+  .lockcard input[type="password"], .lockcard input[type="email"]{
     width:100%;
     font-family:'IBM Plex Sans KR',sans-serif;
     font-size:14.5px;
@@ -1051,7 +1051,7 @@
     border-radius:8px;
     padding:11px 12px;
   }
-  .lockcard input[type="password"]:focus-visible{
+  .lockcard input[type="password"]:focus-visible, .lockcard input[type="email"]:focus-visible{
     outline:2px solid var(--pine);
     outline-offset:1px;
   }
@@ -1400,7 +1400,7 @@
   .chip.selected.sell{background:var(--brick);border-color:var(--brick);}
   .chip.selected.watch{background:var(--olive);border-color:var(--olive);}
 
-  input[type="text"], input[type="date"], input[type="number"], input[type="password"], textarea{
+  input[type="text"], input[type="date"], input[type="number"], input[type="password"], input[type="email"], textarea{
     width:100%;
     font-family:'IBM Plex Sans KR',sans-serif;
     font-size:14.5px;
@@ -2785,6 +2785,16 @@ window.addEventListener('error', function(ev){
     await persistSettingsBlob();
   }
 
+  var previousPrices = {};
+  async function loadPreviousPrices(){
+    await ensureSettingsCacheLoaded();
+    return settingsCache.previousPrices || {};
+  }
+  async function savePreviousPrices(){
+    settingsCache.previousPrices = previousPrices;
+    await persistSettingsBlob();
+  }
+
   function getKnownTickers(){
     var fromRegistry = tickerRegistry.map(function(t){ return t.ticker; });
     var fromEntries = entries.filter(function(e){ return e.ticker && e.ticker.trim(); }).map(function(e){ return e.ticker.trim(); });
@@ -3912,7 +3922,15 @@ window.addEventListener('error', function(ev){
         var isStockClickable = tier.label === '위험' || tier.label === '경계';
         html += '<tr'+(isStockClickable ? ' class="stock-row-clickable" data-ticker="'+escapeHtml(h.ticker)+'" style="cursor:pointer;"' : '')+'>';
         html += '<td>'+(idxMeta?idxMeta.icon+' ':'')+escapeHtml(h.ticker)+(isStockClickable?' 👆':'')+'</td>';
-        html += '<td>'+formatWon(h.currentPrice)+'원</td>';
+        var prevP = previousPrices[h.ticker];
+        var dayChangeHtml = '';
+        if(prevP != null && prevP > 0 && h.currentPrice != null){
+          var dayChangePct = (h.currentPrice - prevP) / prevP * 100;
+          var dayChangeColor = dayChangePct > 0 ? 'var(--brick)' : (dayChangePct < 0 ? 'var(--blue)' : 'var(--ink-faint)');
+          var dayChangeSign = dayChangePct > 0 ? '▲' : (dayChangePct < 0 ? '▼' : '-');
+          dayChangeHtml = '<br><span style="font-size:11px;color:'+dayChangeColor+';">'+dayChangeSign+' '+Math.abs(dayChangePct).toFixed(2)+'%</span>';
+        }
+        html += '<td>'+formatWon(h.currentPrice)+'원'+dayChangeHtml+'</td>';
         html += '<td><span style="color:'+(h.profitPct>=0?'var(--brick)':'var(--blue)')+';font-weight:600;">'+(h.profitPct>=0?'+':'-')+Math.abs(h.profitPct).toFixed(1)+'%</span></td>';
         html += '<td style="color:'+tier.color+';font-weight:700;white-space:nowrap;">'+tier.emoji+' '+tier.label+'</td>';
         html += '</tr>';
@@ -4604,9 +4622,16 @@ window.addEventListener('error', function(ev){
         var ticker = inp.getAttribute('data-ticker');
         var raw = inp.value.replace(/,/g,'');
         var val = parseFloat(raw);
-        if(val > 0){ currentPrices[ticker] = val; }
+        var oldVal = currentPrices[ticker];
+        if(val > 0){
+          if(oldVal != null && oldVal !== val){
+            previousPrices[ticker] = oldVal;
+          }
+          currentPrices[ticker] = val;
+        }
         else{ delete currentPrices[ticker]; }
         await saveCurrentPrices();
+        await savePreviousPrices();
         renderAssetScreen();
       });
     });
@@ -6624,6 +6649,7 @@ window.addEventListener('error', function(ev){
       otherAssets = await loadOtherAssets();
       tickerRegistry = await loadTickerRegistry();
       currentPrices = await loadCurrentPrices();
+      previousPrices = await loadPreviousPrices();
       accounts = await loadAccounts();
       sellSettings = await loadSellSettings();
       indexData = await loadIndexData();
