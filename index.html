@@ -3512,12 +3512,21 @@ window.addEventListener('error', function(ev){
   var VKOSPI_MANUAL_KEY = 'investment:vkospimanual';
   var VKOSPI_MANUAL_LOCAL_KEY = 'investment_journal_vkospimanual_v1';
   var vkospiManualValue = null;
+  var vkospiFetchedDate = null;
   async function loadVkospiManual(){
     await ensureSettingsCacheLoaded();
     return (settingsCache.vkospiManual != null) ? settingsCache.vkospiManual : null;
   }
   async function saveVkospiManual(){
     settingsCache.vkospiManual = vkospiManualValue;
+    await persistSettingsBlob();
+  }
+  async function loadVkospiFetchedDate(){
+    await ensureSettingsCacheLoaded();
+    return settingsCache.vkospiFetchedDate || null;
+  }
+  async function saveVkospiFetchedDate(){
+    settingsCache.vkospiFetchedDate = vkospiFetchedDate;
     await persistSettingsBlob();
   }
   async function fetchMajorQuoteData(){
@@ -3834,7 +3843,14 @@ window.addEventListener('error', function(ev){
       html += '<tr>';
       html += '<td>'+idx.icon+' '+idx.label+(idx.manual?' <span style="font-size:10px;color:var(--ink-faint);">(직접입력)</span>':'')+'</td>';
       if(idx.manual){
-        html += '<td><input type="number" step="0.1" class="vkospiManualInput" value="'+(price!=null?price:'')+'" placeholder="값 입력" style="width:70px;padding:6px 8px;font-size:13px;"></td>';
+        html += '<td><div style="display:flex;align-items:center;gap:4px;">';
+        html += '<input type="number" step="0.1" class="vkospiManualInput" value="'+(price!=null?price:'')+'" placeholder="값 입력" style="width:60px;padding:6px 8px;font-size:13px;">';
+        html += '<button type="button" id="vkospiRefreshBtn" title="KRX에서 전일 종가 가져오기" style="border:1px solid var(--line);background:var(--paper);border-radius:6px;padding:5px 7px;cursor:pointer;font-size:13px;">🔄</button>';
+        html += '</div>';
+        if(vkospiFetchedDate){
+          html += '<p style="font-size:10px;color:var(--ink-faint);margin:3px 0 0;">'+vkospiFetchedDate+' 종가</p>';
+        }
+        html += '</td>';
       }else{
         html += '<td>'+(price!=null ? (idx.unitPos==='prefix' ? idx.unit+price.toLocaleString(undefined,{maximumFractionDigits:2}) : price.toLocaleString(undefined,{maximumFractionDigits:2})+idx.unit) : '-')+'</td>';
       }
@@ -4045,6 +4061,34 @@ window.addEventListener('error', function(ev){
         vkospiManualValue = isNaN(v) ? null : v;
         await saveVkospiManual();
         renderSellChecklistScreen();
+      });
+    }
+    var vkospiRefreshBtn = document.getElementById('vkospiRefreshBtn');
+    if(vkospiRefreshBtn){
+      vkospiRefreshBtn.addEventListener('click', async function(){
+        var btn = this;
+        var originalText = btn.textContent;
+        btn.textContent = '⏳';
+        btn.disabled = true;
+        try{
+          var res = await fetch('/api/krx-vkospi');
+          var data = await res.json();
+          if(!res.ok || data.error){
+            alert('VKOSPI를 가져오지 못했어요: ' + (data.error || ('HTTP ' + res.status)));
+            return;
+          }
+          vkospiManualValue = data.value;
+          var d = data.basDd;
+          vkospiFetchedDate = d ? (d.slice(4,6)+'/'+d.slice(6,8)) : null;
+          await saveVkospiManual();
+          await saveVkospiFetchedDate();
+          renderSellChecklistScreen();
+        }catch(e){
+          alert('VKOSPI 조회 중 오류가 발생했어요: ' + (e && e.message ? e.message : e));
+        }finally{
+          btn.textContent = originalText;
+          btn.disabled = false;
+        }
       });
     }
     document.getElementById('riskThresholdToggleBtn').addEventListener('click', function(){
@@ -6658,6 +6702,7 @@ window.addEventListener('error', function(ev){
       HOLD_CONVICTION_QUESTIONS = await loadHoldQuestions();
       cycleState = await loadCycleState();
       vkospiManualValue = await loadVkospiManual();
+      vkospiFetchedDate = await loadVkospiFetchedDate();
       mkrHistory = await loadMkrHistory();
       var backupReminderData = await loadBackupReminder();
       backupReminderDays = backupReminderData.days != null ? backupReminderData.days : 7;
