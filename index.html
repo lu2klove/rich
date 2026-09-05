@@ -3490,6 +3490,57 @@ window.addEventListener('error', function(ev){
     settingsCache.mkrHistory = mkrHistory;
     await persistSettingsBlob();
   }
+  var mkrBackfillRunning = false;
+  var mkrBackfillProgress = '';
+  var mkrBackfillMsg = '';
+  async function backfillMkrHistory(){
+    mkrBackfillRunning = true;
+    mkrBackfillMsg = '';
+    mkrBackfillProgress = '0/60';
+    renderMarketRiskScreen();
+
+    var collected = 0;
+    var triedDays = 0;
+    var maxCalendarDays = 120; // 60거래일 확보를 위한 여유(주말·공휴일 감안)
+    var d = new Date();
+    var errorMsg = null;
+
+    while(collected < 60 && triedDays < maxCalendarDays){
+      var basDd = d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
+      try{
+        var res = await fetch('/api/krx-index-history?basDd=' + basDd);
+        var data = await res.json();
+        if(!res.ok || data.error){
+          errorMsg = data.error || ('HTTP ' + res.status);
+          break;
+        }
+        if(data.hasData){
+          var dateStr = data.basDd.slice(0,4)+'-'+data.basDd.slice(4,6)+'-'+data.basDd.slice(6,8);
+          var existingIdx = mkrHistory.findIndex(function(s){ return s.date === dateStr; });
+          var snap = { date:dateStr, vkospi:data.vkospi, kospi:data.kospi, kosdaq:data.kosdaq };
+          if(existingIdx > -1) mkrHistory[existingIdx] = snap;
+          else mkrHistory.push(snap);
+          collected++;
+        }
+      }catch(e){
+        errorMsg = e && e.message ? e.message : String(e);
+        break;
+      }
+      triedDays++;
+      mkrBackfillProgress = collected + '/60';
+      renderMarketRiskScreen();
+      d.setDate(d.getDate() - 1);
+    }
+
+    mkrHistory.sort(function(a,b){ return a.date < b.date ? -1 : 1; });
+    if(mkrHistory.length > 90) mkrHistory = mkrHistory.slice(mkrHistory.length - 90);
+    await saveMkrHistory();
+
+    mkrBackfillRunning = false;
+    mkrBackfillMsg = errorMsg ? ('오류: ' + errorMsg + ' (여기까지 '+collected+'일 저장됨)') : (collected + '일치 데이터를 가져왔어요.');
+    renderMarketRiskScreen();
+  }
+
   async function recordMkrSnapshot(vkospi, kospi, kosdaq){
     if(vkospi == null || kospi == null || kosdaq == null) return;
     var today = new Date().toISOString().slice(0,10);
@@ -3749,6 +3800,10 @@ window.addEventListener('error', function(ev){
       html += '<p class="savehint" style="margin-top:6px;">최근 '+corrData.days+'일 데이터 기준</p>';
       html += '</div>';
     }
+    html += '<button class="cancelbtn" id="mkrBackfillBtn" type="button" style="width:100%;margin-top:8px;" '+(mkrBackfillRunning?'disabled':'')+'>'+(mkrBackfillRunning?('⏳ 수집 중… ('+mkrBackfillProgress+')'):'📥 과거 60일 데이터 한번에 채우기 (KRX)')+'</button>';
+    if(mkrBackfillMsg){
+      html += '<p class="savehint" style="margin-top:4px;">'+escapeHtml(mkrBackfillMsg)+'</p>';
+    }
 
     html += '<p class="field-label field-label-strong" style="margin-top:16px;">시장 위험도</p>';
     html += '<div class="verdict-box">';
@@ -3770,13 +3825,17 @@ window.addEventListener('error', function(ev){
     html += '</div>';
 
     html += '<button class="cancelbtn" id="mkrFetchBtn" type="button" style="width:100%;margin-top:16px;">🔄 시장 시세 새로고침</button>';
-    html += '<p class="savehint">VKOSPI는 매도 의사결정 탭의 "주요 지수 시세"에서 직접 입력해요.</p>';
+    html += '<p class="savehint">VKOSPI는 "시장·종목 시세 새로고침" 시 전일 종가 기준으로 자동으로 채워져요.</p>';
 
     body.innerHTML = html;
     document.getElementById('mkrFetchBtn').addEventListener('click', async function(){
       await fetchMarketStatusData();
       renderMarketRiskScreen();
     });
+    var backfillBtn = document.getElementById('mkrBackfillBtn');
+    if(backfillBtn && !mkrBackfillRunning){
+      backfillBtn.addEventListener('click', backfillMkrHistory);
+    }
   }
 
   function renderCycleDetectScreen(){
