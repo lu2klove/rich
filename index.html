@@ -2748,7 +2748,7 @@ window.addEventListener('error', function(ev){
     var resultCode = isCode ? cleanInput : data.resolvedCode;
     var entry = data.results && data.results[resultCode];
     if(!entry) throw new Error('가격 정보를 찾을 수 없어요');
-    return { price: entry.price, code: resultCode, name: entry.name };
+    return { price: entry.price, previousClose: entry.previousClose, code: resultCode, name: entry.name };
   }
   async function fetchYahooQuote(symbol){
     var url = 'https://query1.finance.yahoo.com/v8/finance/chart/' + encodeURIComponent(symbol);
@@ -2809,12 +2809,21 @@ window.addEventListener('error', function(ev){
   // 가격을 갱신할 때마다 호출: "오늘 이전 마지막 값"을 previousPrices로
   // 넘겨서 전일 대비 등락률의 기준을 정확히 "어제(또는 이전 영업일) 값"으로 고정해요.
   // 같은 날 여러 번 갱신해도(수기 재입력, 여러 번 새로고침) 전일 기준은 흔들리지 않아요.
-  function updateCurrentPrice(ticker, newValue){
+  // 가격을 갱신할 때마다 호출.
+  // realPreviousClose가 있으면(네이버/야후가 실제 전일종가를 함께 준 경우) 그 값을
+  // 곧바로 전일 기준으로 써서 첫 새로고침부터 정확한 등락률이 보여요.
+  // 없으면(수동입력 등) "날짜가 실제로 바뀐 마지막 값"을 전일로 취급하는
+  // 방식으로 폴백해서, 같은 날 여러 번 고쳐도 전일 기준이 흔들리지 않게 해요.
+  function updateCurrentPrice(ticker, newValue, realPreviousClose){
     var today = todayStr();
-    var lastDate = priceUpdateDates[ticker];
-    var oldValue = currentPrices[ticker];
-    if(oldValue != null && lastDate && lastDate !== today){
-      previousPrices[ticker] = oldValue;
+    if(realPreviousClose != null && !isNaN(realPreviousClose)){
+      previousPrices[ticker] = realPreviousClose;
+    }else{
+      var lastDate = priceUpdateDates[ticker];
+      var oldValue = currentPrices[ticker];
+      if(oldValue != null && lastDate && lastDate !== today){
+        previousPrices[ticker] = oldValue;
+      }
     }
     currentPrices[ticker] = newValue;
     priceUpdateDates[ticker] = today;
@@ -4305,7 +4314,7 @@ window.addEventListener('error', function(ev){
           domesticWithCode.forEach(function(x){
             var entry = data.results[x.code];
             if(entry){
-              updateCurrentPrice(x.ticker, entry.price);
+              updateCurrentPrice(x.ticker, entry.price, entry.previousClose);
               successCount++;
             }else{
               failCount++;
@@ -4324,15 +4333,18 @@ window.addEventListener('error', function(ev){
       var h = others[i];
       var symbol = getTickerSymbol(h.ticker) || h.ticker;
       try{
-        var price;
+        var price, prevClose;
         if(h.category === 'domestic'){
           var result = await fetchNaverPrice(symbol);
           price = result.price;
+          prevClose = result.previousClose;
           if(result.code) await setTickerSymbol(h.ticker, result.code);
         }else{
-          price = await fetchYahooPrice(symbol);
+          var yq = await fetchYahooQuote(symbol);
+          price = yq.price;
+          prevClose = yq.previousClose;
         }
-        updateCurrentPrice(h.ticker, price);
+        updateCurrentPrice(h.ticker, price, prevClose);
         successCount++;
       }catch(e){
         failCount++;
@@ -4714,22 +4726,27 @@ window.addEventListener('error', function(ev){
         var isDomesticCode = /^\d{6}$/.test(symbol.replace(/\.KS$|\.KQ$/i, ''));
         var isKoreanName = /[가-힣]/.test(symbol);
         try{
-          var price;
+          var price, prevClose;
           if(category === 'domestic' && (isDomesticCode || isKoreanName)){
             try{
               var naverResult = await fetchNaverPrice(symbol);
               price = naverResult.price;
+              prevClose = naverResult.previousClose;
               if(isKoreanName && naverResult.code){
                 await setTickerSymbol(ticker, naverResult.code);
               }
             }catch(naverErr){
               if(isKoreanName) throw naverErr;
-              price = await fetchYahooPrice(symbol);
+              var yq2 = await fetchYahooQuote(symbol);
+              price = yq2.price;
+              prevClose = yq2.previousClose;
             }
           }else{
-            price = await fetchYahooPrice(symbol);
+            var yq3 = await fetchYahooQuote(symbol);
+            price = yq3.price;
+            prevClose = yq3.previousClose;
           }
-          currentPrices[ticker] = price;
+          updateCurrentPrice(ticker, price, prevClose);
           await saveCurrentPrices();
           renderAssetScreen();
         }catch(err){
