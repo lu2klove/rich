@@ -2782,6 +2782,8 @@ window.addEventListener('error', function(ev){
   }
   async function saveCurrentPrices(){
     settingsCache.currentPrices = currentPrices;
+    settingsCache.previousPrices = previousPrices;
+    settingsCache.priceUpdateDates = priceUpdateDates;
     await persistSettingsBlob();
   }
 
@@ -2793,6 +2795,29 @@ window.addEventListener('error', function(ev){
   async function savePreviousPrices(){
     settingsCache.previousPrices = previousPrices;
     await persistSettingsBlob();
+  }
+
+  var priceUpdateDates = {};
+  async function loadPriceUpdateDates(){
+    await ensureSettingsCacheLoaded();
+    return settingsCache.priceUpdateDates || {};
+  }
+  async function savePriceUpdateDates(){
+    settingsCache.priceUpdateDates = priceUpdateDates;
+    await persistSettingsBlob();
+  }
+  // 가격을 갱신할 때마다 호출: "오늘 이전 마지막 값"을 previousPrices로
+  // 넘겨서 전일 대비 등락률의 기준을 정확히 "어제(또는 이전 영업일) 값"으로 고정해요.
+  // 같은 날 여러 번 갱신해도(수기 재입력, 여러 번 새로고침) 전일 기준은 흔들리지 않아요.
+  function updateCurrentPrice(ticker, newValue){
+    var today = todayStr();
+    var lastDate = priceUpdateDates[ticker];
+    var oldValue = currentPrices[ticker];
+    if(oldValue != null && lastDate && lastDate !== today){
+      previousPrices[ticker] = oldValue;
+    }
+    currentPrices[ticker] = newValue;
+    priceUpdateDates[ticker] = today;
   }
 
   function getKnownTickers(){
@@ -3529,6 +3554,24 @@ window.addEventListener('error', function(ev){
     settingsCache.vkospiFetchedDate = vkospiFetchedDate;
     await persistSettingsBlob();
   }
+  async function fetchVkospiData(){
+    try{
+      var res = await fetch('/api/krx-vkospi');
+      var data = await res.json();
+      if(!res.ok || data.error){
+        return { ok:false, error: data.error || ('HTTP ' + res.status) };
+      }
+      vkospiManualValue = data.value;
+      var d = data.basDd;
+      vkospiFetchedDate = d ? (d.slice(4,6)+'/'+d.slice(6,8)) : null;
+      await saveVkospiManual();
+      await saveVkospiFetchedDate();
+      return { ok:true };
+    }catch(e){
+      return { ok:false, error: (e && e.message) ? e.message : String(e) };
+    }
+  }
+
   async function fetchMajorQuoteData(){
     for(var i=0; i<MAJOR_QUOTE_META.length; i++){
       var idx = MAJOR_QUOTE_META[i];
@@ -3843,13 +3886,8 @@ window.addEventListener('error', function(ev){
       html += '<tr>';
       html += '<td>'+idx.icon+' '+idx.label+(idx.manual?' <span style="font-size:10px;color:var(--ink-faint);">(직접입력)</span>':'')+'</td>';
       if(idx.manual){
-        html += '<td><div style="display:flex;align-items:center;gap:4px;">';
-        html += '<input type="number" step="0.1" class="vkospiManualInput" value="'+(price!=null?price:'')+'" placeholder="값 입력" style="width:60px;padding:6px 8px;font-size:13px;">';
-        html += '<button type="button" id="vkospiRefreshBtn" title="KRX에서 전일 종가 가져오기" style="border:1px solid var(--line);background:var(--paper);border-radius:6px;padding:5px 7px;cursor:pointer;font-size:13px;">🔄</button>';
-        html += '</div>';
-        if(vkospiFetchedDate){
-          html += '<p style="font-size:10px;color:var(--ink-faint);margin:3px 0 0;">'+vkospiFetchedDate+' 종가</p>';
-        }
+        html += '<td><input type="number" step="0.1" class="vkospiManualInput" value="'+(price!=null?price:'')+'" placeholder="값 입력" style="width:70px;padding:6px 8px;font-size:13px;">';
+        html += '<p style="font-size:10px;color:var(--ink-faint);margin:3px 0 0;">전일 종가로 가져와요'+(vkospiFetchedDate?' ('+vkospiFetchedDate+' 기준)':'')+'</p>';
         html += '</td>';
       }else{
         html += '<td>'+(price!=null ? (idx.unitPos==='prefix' ? idx.unit+price.toLocaleString(undefined,{maximumFractionDigits:2}) : price.toLocaleString(undefined,{maximumFractionDigits:2})+idx.unit) : '-')+'</td>';
@@ -4063,34 +4101,6 @@ window.addEventListener('error', function(ev){
         renderSellChecklistScreen();
       });
     }
-    var vkospiRefreshBtn = document.getElementById('vkospiRefreshBtn');
-    if(vkospiRefreshBtn){
-      vkospiRefreshBtn.addEventListener('click', async function(){
-        var btn = this;
-        var originalText = btn.textContent;
-        btn.textContent = '⏳';
-        btn.disabled = true;
-        try{
-          var res = await fetch('/api/krx-vkospi');
-          var data = await res.json();
-          if(!res.ok || data.error){
-            alert('VKOSPI를 가져오지 못했어요: ' + (data.error || ('HTTP ' + res.status)));
-            return;
-          }
-          vkospiManualValue = data.value;
-          var d = data.basDd;
-          vkospiFetchedDate = d ? (d.slice(4,6)+'/'+d.slice(6,8)) : null;
-          await saveVkospiManual();
-          await saveVkospiFetchedDate();
-          renderSellChecklistScreen();
-        }catch(e){
-          alert('VKOSPI 조회 중 오류가 발생했어요: ' + (e && e.message ? e.message : e));
-        }finally{
-          btn.textContent = originalText;
-          btn.disabled = false;
-        }
-      });
-    }
     document.getElementById('riskThresholdToggleBtn').addEventListener('click', function(){
       riskSettingsExpanded = !riskSettingsExpanded;
       renderSellChecklistScreen();
@@ -4123,10 +4133,16 @@ window.addEventListener('error', function(ev){
       btn.textContent = '조회 중…';
       await fetchMajorQuoteData();
       await fetchMarketStatusData();
+      var vkospiResult = await fetchVkospiData();
       var priceResult = await performHoldingsPriceRefresh();
-      marketStatusHoldingsRefreshMsg = priceResult.total > 0
-        ? ('보유종목 '+priceResult.successCount+'개 갱신'+(priceResult.failCount>0?' · '+priceResult.failCount+'개 실패':''))
-        : '';
+      var msgParts = [];
+      if(priceResult.total > 0){
+        msgParts.push('보유종목 '+priceResult.successCount+'개 갱신'+(priceResult.failCount>0?' · '+priceResult.failCount+'개 실패':''));
+      }
+      if(!vkospiResult.ok){
+        msgParts.push('VKOSPI 조회 실패: ' + vkospiResult.error);
+      }
+      marketStatusHoldingsRefreshMsg = msgParts.join(' · ');
       renderSellChecklistScreen();
     });
     document.querySelectorAll('.market-row-clickable').forEach(function(row){
@@ -4289,7 +4305,7 @@ window.addEventListener('error', function(ev){
           domesticWithCode.forEach(function(x){
             var entry = data.results[x.code];
             if(entry){
-              currentPrices[x.ticker] = entry.price;
+              updateCurrentPrice(x.ticker, entry.price);
               successCount++;
             }else{
               failCount++;
@@ -4316,7 +4332,7 @@ window.addEventListener('error', function(ev){
         }else{
           price = await fetchYahooPrice(symbol);
         }
-        currentPrices[h.ticker] = price;
+        updateCurrentPrice(h.ticker, price);
         successCount++;
       }catch(e){
         failCount++;
@@ -4666,16 +4682,11 @@ window.addEventListener('error', function(ev){
         var ticker = inp.getAttribute('data-ticker');
         var raw = inp.value.replace(/,/g,'');
         var val = parseFloat(raw);
-        var oldVal = currentPrices[ticker];
         if(val > 0){
-          if(oldVal != null && oldVal !== val){
-            previousPrices[ticker] = oldVal;
-          }
-          currentPrices[ticker] = val;
+          updateCurrentPrice(ticker, val);
         }
         else{ delete currentPrices[ticker]; }
         await saveCurrentPrices();
-        await savePreviousPrices();
         renderAssetScreen();
       });
     });
@@ -6694,6 +6705,7 @@ window.addEventListener('error', function(ev){
       tickerRegistry = await loadTickerRegistry();
       currentPrices = await loadCurrentPrices();
       previousPrices = await loadPreviousPrices();
+      priceUpdateDates = await loadPriceUpdateDates();
       accounts = await loadAccounts();
       sellSettings = await loadSellSettings();
       indexData = await loadIndexData();
