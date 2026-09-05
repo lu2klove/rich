@@ -108,8 +108,12 @@ export default async function handler(request) {
       const priceRaw = item.closePrice;
       const price = priceRaw != null ? Math.round(parseFloat(String(priceRaw).replace(/,/g, ''))) : null;
       if (code && price != null && !isNaN(price)) {
+        const changeRaw = item.compareToPreviousClosePrice;
+        const change = changeRaw != null ? parseFloat(String(changeRaw).replace(/,/g, '')) : null;
+        const previousClose = (change != null && !isNaN(change)) ? Math.round(price - change) : null;
         results[code] = {
           price: price,
+          previousClose: previousClose,
           name: (resolvedNames[code] && resolvedNames[code].name) || item.stockName || item.itemName || null,
           date: item.localTradedAt || null,
           marketStatus: item.marketStatus || null
