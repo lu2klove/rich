@@ -1298,12 +1298,11 @@
   }
   .econ-badge{
     position:absolute;
-    bottom:2px;
-    left:2px;
-    width:6px;
-    height:6px;
-    border-radius:50%;
-    background:var(--blue);
+    bottom:-3px;
+    left:1px;
+    font-size:8px;
+    line-height:1;
+    letter-spacing:-1px;
   }
   .econ-event-box{
     background:var(--paper-raised);
@@ -5476,8 +5475,11 @@ window.addEventListener('error', function(ev){
       }
       var dayEconEvents = getEconomicEventsForDate(ds);
       if(dayEconEvents.length > 0){
+        var hasKr = dayEconEvents.some(function(ev){ return ev.country !== 'US'; });
+        var hasUs = dayEconEvents.some(function(ev){ return ev.country === 'US'; });
         var econBadge = document.createElement('span');
         econBadge.className = 'econ-badge';
+        econBadge.textContent = (hasKr?'🇰🇷':'') + (hasUs?'🇺🇸':'');
         econBadge.title = dayEconEvents.length + '건의 주요 지표 발표';
         cell.appendChild(econBadge);
       }
