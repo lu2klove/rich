@@ -1834,6 +1834,7 @@
       <button class="navbtn todaybtn" id="gotoTodayBtn" type="button" aria-label="오늘">📅</button>
     </div>
     <div class="stampgrid" id="stampgrid"></div>
+    <p class="savehint" id="econCalendarError" style="display:none;color:var(--brick);"></p>
     <div class="day-detail" id="dayDetail"></div>
     <div class="day-detail" id="monthEntriesDetail"></div>
   </div>
@@ -5387,15 +5388,23 @@ window.addEventListener('error', function(ev){
   }
 
   var economicCalendarCache = {}; // { '202609': [{date, name, agency, cycle}, ...] }
+  var economicCalendarLastError = '';
   async function fetchEconomicCalendar(yyyymm){
     if(economicCalendarCache[yyyymm]) return economicCalendarCache[yyyymm];
     try{
       var res = await fetch('/api/economic-calendar?yyyymm=' + yyyymm);
       var data = await res.json();
-      if(!res.ok || data.error){ return []; }
+      if(!res.ok || data.error){
+        economicCalendarLastError = (data && data.error) ? data.error : ('HTTP ' + res.status);
+        console.error('[주요일정 오류]', economicCalendarLastError, data);
+        return [];
+      }
+      economicCalendarLastError = '';
       economicCalendarCache[yyyymm] = data.events || [];
       return economicCalendarCache[yyyymm];
     }catch(e){
+      economicCalendarLastError = (e && e.message) ? e.message : String(e);
+      console.error('[주요일정 오류]', economicCalendarLastError);
       return [];
     }
   }
@@ -5467,6 +5476,15 @@ window.addEventListener('error', function(ev){
     var yyyymmKey = y + pad(m+1);
     if(!economicCalendarCache[yyyymmKey]){
       fetchEconomicCalendar(yyyymmKey).then(function(){
+        var errEl = document.getElementById('econCalendarError');
+        if(errEl){
+          if(economicCalendarLastError){
+            errEl.style.display = 'block';
+            errEl.textContent = '⚠️ 주요일정 불러오기 실패: ' + economicCalendarLastError;
+          }else{
+            errEl.style.display = 'none';
+          }
+        }
         if(calendarOffset === (y - now.getFullYear())*12 + (m - now.getMonth())){
           renderStampGrid(false);
         }
