@@ -5393,7 +5393,7 @@ window.addEventListener('error', function(ev){
     if(economicCalendarCache[yyyymm]) return economicCalendarCache[yyyymm];
     try{
       var controller = new AbortController();
-      var timeoutId = setTimeout(function(){ controller.abort(); }, 12000);
+      var timeoutId = setTimeout(function(){ controller.abort(); }, 16000);
       var res;
       try{
         res = await fetch('/api/economic-calendar?yyyymm=' + yyyymm, { signal: controller.signal });
