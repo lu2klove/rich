@@ -11,7 +11,8 @@
 // - 미국(FRED)은 발표 "날짜"만 주고 정확한 "시각"은 안 줘요. 그래서 BLS의 잘 알려진 관행(대부분
 //   08:30 AM ET, JOLTS는 10:00 AM ET)을 참고용으로 표시해요 - 실제 시각과 다를 수 있어요.
 
-export const config = { runtime: 'edge' };
+// (Edge 런타임에서 api.stlouisfed.org로의 외부 연결이 계속 시간초과가 나서,
+//  더 전통적인 네트워크 스택을 쓰는 Node.js 런타임으로 바꿨어요.)
 
 async function fetchWithTimeout(url, options, timeoutMs){
   const controller = new AbortController();
@@ -158,18 +159,13 @@ async function fetchKoreaEvents(yyyymm){
   return { events };
 }
 
-export default async function handler(request) {
-  let requestUrlForDebug = '';
+export default async function handler(req, res) {
   try {
-    requestUrlForDebug = String(request.url || '');
-    const yyyymmMatch = requestUrlForDebug.match(/[?&]yyyymm=(\d{6})/);
-    const yyyymm = yyyymmMatch ? yyyymmMatch[1] : null;
+    const yyyymm = req.query && req.query.yyyymm;
 
-    if (!yyyymm) {
-      return Response.json(
-        { error: 'yyyymm 파라미터가 필요해요 (YYYYMM 형식)', debugUrl: requestUrlForDebug },
-        { status: 400 }
-      );
+    if (!yyyymm || !/^\d{6}$/.test(yyyymm)) {
+      res.status(400).json({ error: 'yyyymm 파라미터가 필요해요 (YYYYMM 형식)' });
+      return;
     }
 
     const fredApiKey = process.env.FRED_API_KEY;
@@ -193,16 +189,13 @@ export default async function handler(request) {
     if (usResult && usResult.error) notes.push('미국: ' + usResult.error);
     if (usResult && usResult.note) notes.push('미국: ' + usResult.note);
 
-    return Response.json({
+    res.status(200).json({
       yyyymm: yyyymm,
       count: events.length,
       events: events,
       notes: notes.length > 0 ? notes : undefined
     });
   } catch (err) {
-    return Response.json(
-      { error: (err && err.message) || '알 수 없는 오류', debugUrl: requestUrlForDebug },
-      { status: 500 }
-    );
+    res.status(500).json({ error: (err && err.message) || '알 수 없는 오류' });
   }
 }
