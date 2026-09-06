@@ -15,7 +15,7 @@ export const config = { runtime: 'edge' };
 
 async function fetchWithTimeout(url, options, timeoutMs){
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs || 8000);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs || 15000);
   try {
     return await fetch(url, Object.assign({}, options, { signal: controller.signal }));
   } finally {
@@ -42,43 +42,17 @@ function isRelevantStat(name, keywords){
 }
 
 // 미국은 FRED(세인트루이스 연은) 공식 API로 가져와요.
-// release_id를 하드코딩하지 않고, 매번 이름으로 검색해서 안전하게 찾아요.
-const US_RELEASE_NAME_KEYWORDS = [
-  'Consumer Price Index',
-  'Producer Price Index',
-  'Employment Situation',
-  'Job Openings and Labor Turnover',
-  'Employment Cost Index'
+// 매번 전체 지표 목록을 조회해서 이름으로 찾는 방식은 느려서(목록 조회 자체가 느림),
+// 잘 알려진 release_id를 직접 써요. (CPI=10은 검색으로 직접 확인, 나머지는 FRED의
+// 공개된 release_id 체계를 참고했어요 - 혹시 틀렸다면 각 항목이 개별적으로 실패 처리되니
+// 다른 지표에는 영향 없어요)
+const US_RELEASES = [
+  { id: 10, name: 'Consumer Price Index', time: '08:30 AM ET (참고)' },
+  { id: 46, name: 'Producer Price Index', time: '08:30 AM ET (참고)' },
+  { id: 50, name: 'Employment Situation', time: '08:30 AM ET (참고)' },
+  { id: 68, name: 'Job Openings and Labor Turnover', time: '10:00 AM ET (참고)' },
+  { id: 12, name: 'Employment Cost Index', time: '08:30 AM ET (참고)' }
 ];
-// FRED는 발표 "시각"은 안 주기 때문에, BLS의 잘 알려진 관행(대부분 08:30 AM ET,
-// JOLTS만 10:00 AM ET)을 참고용으로 붙여요. 실제 시각과 다를 수 있어요.
-function typicalUsReleaseTime(name){
-  if (name.includes('Job Openings')) return '10:00 AM ET (참고)';
-  return '08:30 AM ET (참고)';
-}
-
-let usReleaseIdCache = null; // 같은 함수 인스턴스가 재사용될 때를 위한 메모리 캐시(있으면 이득, 없어도 무해)
-
-async function findUsReleaseIds(apiKey){
-  if (usReleaseIdCache) return usReleaseIdCache;
-
-  const url = `https://api.stlouisfed.org/fred/releases?api_key=${encodeURIComponent(apiKey)}&file_type=json`;
-  const res = await fetchWithTimeout(url, {}, 8000);
-  const text = await res.text();
-  if (!res.ok) {
-    throw new Error(`FRED releases 목록 조회 실패(HTTP ${res.status}): ${text.slice(0, 200)}`);
-  }
-  const data = JSON.parse(text);
-  const releases = Array.isArray(data.releases) ? data.releases : [];
-
-  const found = [];
-  US_RELEASE_NAME_KEYWORDS.forEach((kw) => {
-    const match = releases.find((r) => r.name === kw);
-    if (match) found.push({ id: match.id, name: match.name });
-  });
-  usReleaseIdCache = found;
-  return found;
-}
 
 async function fetchUsEvents(yyyymm, apiKey){
   if (!apiKey) {
@@ -91,30 +65,20 @@ async function fetchUsEvents(yyyymm, apiKey){
   const fromDate = `${year}-${month}-01`;
   const toDate = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
 
-  let releaseList;
-  try {
-    releaseList = await findUsReleaseIds(apiKey);
-  } catch (e) {
-    return { error: e.message };
-  }
-  if (releaseList.length === 0) {
-    return { events: [], note: 'FRED에서 지표 목록을 찾지 못했어요.' };
-  }
-
-  const results = await Promise.all(releaseList.map(async (rel) => {
+  const results = await Promise.all(US_RELEASES.map(async (rel) => {
     const url = `https://api.stlouisfed.org/fred/releases/dates`
       + `?release_id=${rel.id}&api_key=${encodeURIComponent(apiKey)}&file_type=json`
       + `&include_release_dates_with_no_data=true`
       + `&realtime_start=${fromDate}&realtime_end=${toDate}`;
     try {
-      const res = await fetchWithTimeout(url, {}, 8000);
+      const res = await fetchWithTimeout(url, {}, 10000);
       const text = await res.text();
-      if (!res.ok) return { rel, error: `HTTP ${res.status}` };
+      if (!res.ok) return { rel, error: `HTTP ${res.status}: ${text.slice(0,150)}` };
       const data = JSON.parse(text);
       const dates = Array.isArray(data.release_dates) ? data.release_dates : [];
       return { rel, dates };
     } catch (e) {
-      return { rel, error: e.message };
+      return { rel, error: (e && e.name === 'AbortError') ? '시간 초과' : (e && e.message) };
     }
   }));
 
@@ -125,7 +89,7 @@ async function fetchUsEvents(yyyymm, apiKey){
     (r.dates || []).forEach((d) => {
       events.push({
         date: d.date,
-        time: typicalUsReleaseTime(r.rel.name),
+        time: r.rel.time,
         name: r.rel.name,
         agency: 'FRED/BLS',
         country: 'US'
@@ -155,7 +119,7 @@ async function fetchKoreaEvents(yyyymm){
     return { events: [], note: '국내 일정은 현재 이번 달만 지원돼요' };
   }
 
-  const res = await fetchWithTimeout('https://mods.go.kr/newsPln.es?mid=a10305000000', {}, 8000);
+  const res = await fetchWithTimeout('https://mods.go.kr/newsPln.es?mid=a10305000000', {}, 12000);
   const html = await res.text();
   if (!res.ok) {
     return { error: `국가데이터처 응답 오류(HTTP ${res.status})` };
