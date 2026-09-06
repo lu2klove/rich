@@ -5396,6 +5396,7 @@ window.addEventListener('error', function(ev){
       var data = await res.json();
       if(!res.ok || data.error){
         economicCalendarLastError = (data && data.error) ? data.error : ('HTTP ' + res.status);
+        if(data && data.debugUrl) economicCalendarLastError += ' (요청주소: ' + data.debugUrl + ')';
         console.error('[주요일정 오류]', economicCalendarLastError, data);
         return [];
       }
