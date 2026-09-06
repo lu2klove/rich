@@ -1,107 +1,106 @@
-// 공공데이터포털(data.go.kr) - 국가데이터처(구 통계청) 통계정책관리시스템
-// 승인통계관리 데이터에서, 지정한 연월(yyyymm)에 공표예정일이 속하는
-// 국내 통계 발표 일정을 가져옵니다.
+// 국가데이터처(구 통계청) "보도계획" 페이지를 읽어와서,
+// 투자 참고용 핵심 거시지표의 발표 일정(날짜+시각)을 추출합니다.
 //
-// 필요 환경변수: DATA_GO_KR_KEY (공공데이터포털에서 발급받은 "일반 인증키")
-// 데이터 출처: data.go.kr, 국가데이터처_통계정책관리시스템 승인통계관리
+// 출처: https://mods.go.kr/newsPln.es?mid=a10305000000
+// 이 페이지는 정식 오픈API가 아니라 정부 웹페이지라, 표 내용을 직접 읽어서 파싱해요.
+// 페이지가 기본적으로 "이번 달"만 보여주는 구조라, 우선 이번 달만 지원해요.
 //
 // 한계:
-// - 시각(HH:MM)은 없고 날짜(YYYY-MM-DD)만 제공돼요.
-// - 국내 통계만 다뤄요 (해외 지표는 포함 안 됨).
-// - 원본 데이터가 연 1회 갱신이라, 공표예정일이 비어있거나 최신이 아닐 수 있어요.
+// - 정식 API가 아니므로, 정부가 페이지 구조를 바꾸면 파싱이 깨질 수 있어요.
+// - 현재는 "이번 달"만 지원돼요 (다른 달 파라미터는 추후 확인 필요).
 
 export const config = { runtime: 'edge' };
 
-const BASE_PATH = '/api/15086581/v1/uddi:01d5c55c-0586-4b90-a008-9984c7f0ae1e';
-
-// 투자 참고용으로 의미있는 핵심 거시지표만 걸러내는 키워드 화이트리스트.
-// 1,363개 전체 승인통계 중 대부분은 투자와 무관한 부처별 행정통계라,
-// 이 목록에 포함된 이름을 가진 통계만 보여줘요.
+// 투자 참고용으로 의미있는 핵심 거시지표만 걸러내는 키워드 화이트리스트
 const RELEVANT_KEYWORDS = [
   '소비자물가', 'CPI',
   '생산자물가', 'PPI',
   '수출입동향', '무역수지', '수출동향', '수입동향',
   '국제수지', '경상수지',
-  '국민소득', 'GNI', '국내총생산', 'GDP',
+  '국민소득', 'GNI', '국내총생산', 'GDP', '국민이전계정', '지역내총생산',
   '고용동향', '실업률', '고용률', '경제활동인구',
-  '산업생산', '광공업생산동향', '서비스업동향',
-  '경기동향지수', '경기종합지수',
-  '소매판매동향', '소매판매액',
-  '설비투자동향',
-  '건설수주동향', '건설기성',
-  '기업경기실사지수', 'BSI',
-  '소비자심리지수', 'CCSI',
-  '통화금융', '통화량', 'M2',
-  '가계신용', '가계대출',
-  '외환보유액',
-  '생산자물가지수',
-  '기업경기전망'
+  '산업활동동향', '산업생산', '광공업생산', '서비스업동향',
+  '소매판매', '설비투자', '건설수주', '건설기성',
+  '기업경기실사지수', 'BSI', '소비자심리지수', 'CCSI',
+  '통화금융', '통화량', 'M2', '가계신용', '가계대출',
+  '국제이전계정', '외환보유액'
 ];
 function isRelevantStat(name){
   return RELEVANT_KEYWORDS.some((kw) => name.includes(kw));
 }
 
+function stripTags(html){
+  return html
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export default async function handler(request) {
   try {
     const { searchParams } = new URL(request.url);
-    const yyyymm = searchParams.get('yyyymm'); // 예: 202609
+    const yyyymm = searchParams.get('yyyymm');
 
     if (!yyyymm || !/^\d{6}$/.test(yyyymm)) {
       return Response.json({ error: 'yyyymm 파라미터가 필요해요 (YYYYMM 형식)' }, { status: 400 });
     }
 
-    const serviceKey = process.env.DATA_GO_KR_KEY;
-    if (!serviceKey) {
-      return Response.json({ error: 'DATA_GO_KR_KEY 환경변수가 설정되지 않았어요.' }, { status: 500 });
+    const now = new Date();
+    const currentYyyymm = String(now.getFullYear()) + String(now.getMonth() + 1).padStart(2, '0');
+    if (yyyymm !== currentYyyymm) {
+      // 이 페이지는 기본적으로 "이번 달"만 보여줘요. 다른 달 조회 방법은 추후 지원 예정.
+      return Response.json({ yyyymm: yyyymm, count: 0, events: [], note: '현재는 이번 달만 지원돼요' });
     }
 
-    const year = yyyymm.slice(0, 4);
-    const month = yyyymm.slice(4, 6);
-    const lastDay = new Date(parseInt(year, 10), parseInt(month, 10), 0).getDate();
-    const fromDate = `${year}-${month}-01`;
-    const toDate = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
-
-    // cond[] 필터 문법(한글 필드명 인코딩 이슈 등)을 피하기 위해,
-    // 전체 데이터를 한 번에 받아서 이 함수 안에서 직접 날짜 범위로 걸러내요.
-    // (전체 약 1,363건 수준이라 한 번에 받아도 부담 없어요)
-    const url = `https://api.odcloud.kr${BASE_PATH}`
-      + `?page=1&perPage=2000&returnType=JSON`
-      + `&serviceKey=${encodeURIComponent(serviceKey)}`;
-
-    const res = await fetch(url);
-    const rawText = await res.text();
+    const res = await fetch('https://mods.go.kr/newsPln.es?mid=a10305000000');
+    const html = await res.text();
 
     if (!res.ok) {
       return Response.json(
-        { error: `공공데이터포털 응답 오류(HTTP ${res.status})`, raw: rawText.slice(0, 500) },
+        { error: `국가데이터처 응답 오류(HTTP ${res.status})`, raw: html.slice(0, 500) },
         { status: res.status }
       );
     }
 
-    let data;
-    try {
-      data = JSON.parse(rawText);
-    } catch (e) {
-      return Response.json({ error: '응답을 JSON으로 해석하지 못했어요.', raw: rawText.slice(0, 500) }, { status: 500 });
+    const tdRegex = /<td[^>]*>([\s\S]*?)<\/td>/g;
+    const cells = [];
+    let m;
+    while ((m = tdRegex.exec(html)) !== null) {
+      cells.push(stripTags(m[1]));
     }
 
-    const allRows = Array.isArray(data.data) ? data.data : [];
-    const rows = allRows.filter((r) => {
-      const d = r['공표예정일'];
-      const name = r['통계명'] || '';
-      return d && d >= fromDate && d <= toDate && isRelevantStat(name);
+    const dateRe = /^(\d{2})\.(\d{2})\.\(\s*[월화수목금토일]\s*\)$/;
+    const yearNum = yyyymm.slice(0, 4);
+    const events = [];
+
+    for (let i = 0; i < cells.length; i++) {
+      const dm = cells[i].match(dateRe);
+      if (dm && cells[i + 1] != null && cells[i + 2] != null) {
+        const mm = dm[1];
+        const dd = dm[2];
+        const timeStr = cells[i + 1];
+        const title = cells[i + 2];
+        const dept = cells[i + 3] || '';
+        if (isRelevantStat(title)) {
+          events.push({
+            date: `${yearNum}-${mm}-${dd}`,
+            time: timeStr,
+            name: title,
+            agency: dept,
+            cycle: ''
+          });
+        }
+      }
+    }
+
+    events.sort((a, b) => {
+      if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+      return (a.time || '') < (b.time || '') ? -1 : 1;
     });
 
-    const events = rows
-      .map((r) => ({
-        date: r['공표예정일'],
-        name: r['통계명'] || '',
-        agency: r['기관명'] || '',
-        cycle: r['작성주기'] || ''
-      }))
-      .sort((a, b) => (a.date < b.date ? -1 : 1));
-
-    return Response.json({ yyyymm: yyyymm, count: events.length, totalRowsFetched: allRows.length, events: events });
+    return Response.json({ yyyymm: yyyymm, count: events.length, totalCellsParsed: cells.length, events: events });
   } catch (err) {
     return Response.json({ error: err.message || '알 수 없는 오류' }, { status: 500 });
   }
