@@ -6168,12 +6168,13 @@ window.addEventListener('error', function(ev){
       html += '<div class="econ-event-box">';
       html += '<p class="field-label field-label-strong">📅 이 날의 주요 지표 발표 (국내)</p>';
       dayEconEvents.forEach(function(ev){
-        html += '<div class="econ-event-item"><b>'+escapeHtml(ev.name)+'</b>';
+        html += '<div class="econ-event-item">';
+        if(ev.time) html += '<b style="color:var(--amber);">'+escapeHtml(ev.time)+'</b> ';
+        html += '<b>'+escapeHtml(ev.name)+'</b>';
         if(ev.agency) html += ' <span style="color:var(--ink-faint);">· '+escapeHtml(ev.agency)+'</span>';
-        if(ev.cycle) html += ' <span style="color:var(--ink-faint);">('+escapeHtml(ev.cycle)+')</span>';
         html += '</div>';
       });
-      html += '<p class="savehint" style="margin-top:4px;">공공데이터포털 제공 · 시각 정보 없이 날짜만 제공돼요</p>';
+      html += '<p class="savehint" style="margin-top:4px;">국가데이터처 보도계획 기준 · 현재는 이번 달만 지원돼요</p>';
       html += '</div>';
     }
 
