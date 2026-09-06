@@ -67,7 +67,7 @@ async function fetchUsEvents(yyyymm, apiKey){
   const toDate = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
 
   const results = await Promise.all(US_RELEASES.map(async (rel) => {
-    const url = `https://api.stlouisfed.org/fred/releases/dates`
+    const url = `https://api.stlouisfed.org/fred/release/dates`
       + `?release_id=${rel.id}&api_key=${encodeURIComponent(apiKey)}&file_type=json`
       + `&include_release_dates_with_no_data=true`
       + `&realtime_start=${fromDate}&realtime_end=${toDate}`;
