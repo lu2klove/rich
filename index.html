@@ -5484,11 +5484,14 @@ window.addEventListener('error', function(ev){
       fetchEconomicCalendar(yyyymmKey).then(function(){
         var errEl = document.getElementById('econCalendarError');
         if(errEl){
+          errEl.style.display = 'block';
           if(economicCalendarLastError){
-            errEl.style.display = 'block';
+            errEl.style.color = 'var(--brick)';
             errEl.textContent = '⚠️ 주요일정 불러오기 실패: ' + economicCalendarLastError;
           }else{
-            errEl.style.display = 'none';
+            var fetchedCount = (economicCalendarCache[yyyymmKey] || []).length;
+            errEl.style.color = 'var(--ink-faint)';
+            errEl.textContent = '주요일정 조회 완료: ' + fetchedCount + '건 (' + yyyymmKey + ')';
           }
         }
         if(calendarOffset === (y - now.getFullYear())*12 + (m - now.getMonth())){
