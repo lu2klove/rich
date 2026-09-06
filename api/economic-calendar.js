@@ -1,13 +1,15 @@
-// 국내(국가데이터처 보도계획) + 미국(BLS 발표일정) 두 소스를 합쳐서,
+// 국내(국가데이터처 보도계획) + 미국(FRED 공식 API) 두 소스를 합쳐서,
 // 투자 참고용 핵심 거시지표의 발표 일정(날짜+시각)을 추출합니다.
 //
-// 국내 출처: https://mods.go.kr/newsPln.es?mid=a10305000000 (이번 달만 지원)
-// 미국 출처: https://www.bls.gov/schedule/{year}/{month}_sched.htm (원하는 달 지정 가능)
-// 둘 다 정식 오픈API가 아니라 정부 웹페이지라, 표/캘린더 내용을 직접 읽어서 파싱해요.
+// 국내 출처: https://mods.go.kr/newsPln.es?mid=a10305000000 (이번 달만 지원, 정식 API 아님 - 스크래핑)
+// 미국 출처: https://api.stlouisfed.org/fred (세인트루이스 연은 공식 API, 원하는 달 조회 가능)
+//
+// 필요 환경변수: FRED_API_KEY
 //
 // 한계:
-// - 정식 API가 아니므로, 정부가 페이지 구조를 바꾸면 파싱이 깨질 수 있어요.
-// - 국내는 "이번 달"만 지원돼요. 미국은 원하는 달 조회가 가능해요.
+// - 국내는 정식 API가 아니라 정부 웹페이지를 읽는 방식이라, 페이지 구조가 바뀌면 깨질 수 있고 이번 달만 지원돼요.
+// - 미국(FRED)은 발표 "날짜"만 주고 정확한 "시각"은 안 줘요. 그래서 BLS의 잘 알려진 관행(대부분
+//   08:30 AM ET, JOLTS는 10:00 AM ET)을 참고용으로 표시해요 - 실제 시각과 다를 수 있어요.
 
 export const config = { runtime: 'edge' };
 
@@ -25,19 +27,106 @@ const RELEVANT_KEYWORDS_KR = [
   '통화금융', '통화량', 'M2', '가계신용', '가계대출',
   '국제이전계정', '외환보유액'
 ];
-// 미국은 BLS 발표만 다루므로, BLS가 실제로 발표하는 지표명 기준으로 화이트리스트를 만들어요.
-const RELEVANT_KEYWORDS_US = [
+function isRelevantStat(name, keywords){
+  return keywords.some((kw) => name.includes(kw));
+}
+
+// 미국은 FRED(세인트루이스 연은) 공식 API로 가져와요.
+// release_id를 하드코딩하지 않고, 매번 이름으로 검색해서 안전하게 찾아요.
+const US_RELEASE_NAME_KEYWORDS = [
   'Consumer Price Index',
   'Producer Price Index',
   'Employment Situation',
   'Job Openings and Labor Turnover',
-  'Employment Cost Index',
-  'Real Earnings',
-  'Import and Export Price Indexes',
-  'Productivity and Costs'
+  'Employment Cost Index'
 ];
-function isRelevantStat(name, keywords){
-  return keywords.some((kw) => name.includes(kw));
+// FRED는 발표 "시각"은 안 주기 때문에, BLS의 잘 알려진 관행(대부분 08:30 AM ET,
+// JOLTS만 10:00 AM ET)을 참고용으로 붙여요. 실제 시각과 다를 수 있어요.
+function typicalUsReleaseTime(name){
+  if (name.includes('Job Openings')) return '10:00 AM ET (참고)';
+  return '08:30 AM ET (참고)';
+}
+
+let usReleaseIdCache = null; // 같은 함수 인스턴스가 재사용될 때를 위한 메모리 캐시(있으면 이득, 없어도 무해)
+
+async function findUsReleaseIds(apiKey){
+  if (usReleaseIdCache) return usReleaseIdCache;
+
+  const url = `https://api.stlouisfed.org/fred/releases?api_key=${encodeURIComponent(apiKey)}&file_type=json`;
+  const res = await fetch(url);
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(`FRED releases 목록 조회 실패(HTTP ${res.status}): ${text.slice(0, 200)}`);
+  }
+  const data = JSON.parse(text);
+  const releases = Array.isArray(data.releases) ? data.releases : [];
+
+  const found = [];
+  US_RELEASE_NAME_KEYWORDS.forEach((kw) => {
+    const match = releases.find((r) => r.name === kw);
+    if (match) found.push({ id: match.id, name: match.name });
+  });
+  usReleaseIdCache = found;
+  return found;
+}
+
+async function fetchUsEvents(yyyymm, apiKey){
+  if (!apiKey) {
+    return { error: 'FRED_API_KEY 환경변수가 설정되지 않았어요.' };
+  }
+
+  const year = yyyymm.slice(0, 4);
+  const month = yyyymm.slice(4, 6);
+  const lastDay = new Date(parseInt(year, 10), parseInt(month, 10), 0).getDate();
+  const fromDate = `${year}-${month}-01`;
+  const toDate = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
+
+  let releaseList;
+  try {
+    releaseList = await findUsReleaseIds(apiKey);
+  } catch (e) {
+    return { error: e.message };
+  }
+  if (releaseList.length === 0) {
+    return { events: [], note: 'FRED에서 지표 목록을 찾지 못했어요.' };
+  }
+
+  const results = await Promise.all(releaseList.map(async (rel) => {
+    const url = `https://api.stlouisfed.org/fred/releases/dates`
+      + `?release_id=${rel.id}&api_key=${encodeURIComponent(apiKey)}&file_type=json`
+      + `&include_release_dates_with_no_data=true`
+      + `&realtime_start=${fromDate}&realtime_end=${toDate}`;
+    try {
+      const res = await fetch(url);
+      const text = await res.text();
+      if (!res.ok) return { rel, error: `HTTP ${res.status}` };
+      const data = JSON.parse(text);
+      const dates = Array.isArray(data.release_dates) ? data.release_dates : [];
+      return { rel, dates };
+    } catch (e) {
+      return { rel, error: e.message };
+    }
+  }));
+
+  const events = [];
+  const errors = [];
+  results.forEach((r) => {
+    if (r.error) { errors.push(`${r.rel.name}: ${r.error}`); return; }
+    (r.dates || []).forEach((d) => {
+      events.push({
+        date: d.date,
+        time: typicalUsReleaseTime(r.rel.name),
+        name: r.rel.name,
+        agency: 'FRED/BLS',
+        country: 'US'
+      });
+    });
+  });
+
+  if (events.length === 0) {
+    return { events: [], note: errors.length > 0 ? ('FRED 오류: ' + errors.join(' / ')) : '이번 달 해당 없음' };
+  }
+  return { events };
 }
 
 function stripTags(html){
@@ -95,82 +184,6 @@ async function fetchKoreaEvents(yyyymm){
   return { events };
 }
 
-async function fetchUsEvents(yyyymm){
-  const year = yyyymm.slice(0, 4);
-  const month = yyyymm.slice(4, 6);
-  const url = `https://www.bls.gov/schedule/${year}/${month}_sched.htm`;
-
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
-  });
-  const html = await res.text();
-  if (!res.ok) {
-    return { error: `BLS 응답 오류(HTTP ${res.status})`, note: `응답길이:${html.length}, 앞부분:${html.slice(0,200)}` };
-  }
-
-  // 캘린더 표 부분의 <td> 셀만 추출
-  const tdRegex = /<td[^>]*>([\s\S]*?)<\/td>/g;
-  const cellsHtml = [];
-  let m;
-  while ((m = tdRegex.exec(html)) !== null) {
-    cellsHtml.push(m[1]);
-  }
-
-  const events = [];
-  let lastDay = 0;
-  let inTargetMonth = false;
-  let dateMatchCount = 0;
-  let boldTagCount = 0;
-
-  for (let i = 0; i < cellsHtml.length; i++) {
-    const rawCell = cellsHtml[i];
-    const dayMatch = rawCell.match(/^\s*(\d{1,2})\s*<br/i);
-    if (!dayMatch) continue;
-    dateMatchCount++;
-    const day = parseInt(dayMatch[1], 10);
-
-    if (day < lastDay) {
-      if (!inTargetMonth) {
-        inTargetMonth = true; // 이전 달 마지막 날들 다음, 이번 달 1일 시작
-      } else {
-        break; // 이번 달 다 지나고 다음 달로 넘어감 -> 종료
-      }
-    }
-    lastDay = day;
-    if (!inTargetMonth) continue;
-
-    if (/<(?:strong|b)>/i.test(rawCell)) boldTagCount++;
-
-    // 셀 안에서 <strong>지표명</strong> 뒤에 오는 텍스트(기간/시각)를 짝지어 추출
-    const itemRegex = /<(?:strong|b)>([\s\S]*?)<\/(?:strong|b)>([\s\S]*?)(?=<(?:strong|b)>|$)/g;
-    let im;
-    while ((im = itemRegex.exec(rawCell)) !== null) {
-      const title = stripTags(im[1]);
-      const rest = stripTags(im[2]);
-      if (!title) continue;
-      if (isRelevantStat(title, RELEVANT_KEYWORDS_US)) {
-        const timeMatch = rest.match(/\d{1,2}:\d{2}\s*[AP]M/i);
-        const dd = String(day).padStart(2, '0');
-        events.push({
-          date: `${year}-${month}-${dd}`,
-          time: timeMatch ? timeMatch[0] : '',
-          name: title,
-          agency: 'BLS',
-          country: 'US'
-        });
-      }
-    }
-  }
-
-  if (events.length === 0) {
-    return {
-      events: [],
-      note: `BLS 파싱 결과 0건 (td셀:${cellsHtml.length}, 날짜매칭:${dateMatchCount}, 굵은글씨셀:${boldTagCount})`
-    };
-  }
-  return { events };
-}
-
 export default async function handler(request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -180,9 +193,10 @@ export default async function handler(request) {
       return Response.json({ error: 'yyyymm 파라미터가 필요해요 (YYYYMM 형식)' }, { status: 400 });
     }
 
+    const fredApiKey = process.env.FRED_API_KEY;
     const [krResult, usResult] = await Promise.all([
       fetchKoreaEvents(yyyymm).catch((e) => ({ error: e.message })),
-      fetchUsEvents(yyyymm).catch((e) => ({ error: e.message }))
+      fetchUsEvents(yyyymm, fredApiKey).catch((e) => ({ error: e.message }))
     ]);
 
     const events = [].concat(krResult.events || [], usResult.events || []);
