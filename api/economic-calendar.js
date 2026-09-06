@@ -13,6 +13,16 @@
 
 export const config = { runtime: 'edge' };
 
+async function fetchWithTimeout(url, options, timeoutMs){
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs || 8000);
+  try {
+    return await fetch(url, Object.assign({}, options, { signal: controller.signal }));
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 // 투자 참고용으로 의미있는 핵심 거시지표만 걸러내는 키워드 화이트리스트
 const RELEVANT_KEYWORDS_KR = [
   '소비자물가', 'CPI',
@@ -53,7 +63,7 @@ async function findUsReleaseIds(apiKey){
   if (usReleaseIdCache) return usReleaseIdCache;
 
   const url = `https://api.stlouisfed.org/fred/releases?api_key=${encodeURIComponent(apiKey)}&file_type=json`;
-  const res = await fetch(url);
+  const res = await fetchWithTimeout(url, {}, 8000);
   const text = await res.text();
   if (!res.ok) {
     throw new Error(`FRED releases 목록 조회 실패(HTTP ${res.status}): ${text.slice(0, 200)}`);
@@ -97,7 +107,7 @@ async function fetchUsEvents(yyyymm, apiKey){
       + `&include_release_dates_with_no_data=true`
       + `&realtime_start=${fromDate}&realtime_end=${toDate}`;
     try {
-      const res = await fetch(url);
+      const res = await fetchWithTimeout(url, {}, 8000);
       const text = await res.text();
       if (!res.ok) return { rel, error: `HTTP ${res.status}` };
       const data = JSON.parse(text);
@@ -145,7 +155,7 @@ async function fetchKoreaEvents(yyyymm){
     return { events: [], note: '국내 일정은 현재 이번 달만 지원돼요' };
   }
 
-  const res = await fetch('https://mods.go.kr/newsPln.es?mid=a10305000000');
+  const res = await fetchWithTimeout('https://mods.go.kr/newsPln.es?mid=a10305000000', {}, 8000);
   const html = await res.text();
   if (!res.ok) {
     return { error: `국가데이터처 응답 오류(HTTP ${res.status})` };
@@ -200,17 +210,12 @@ export default async function handler(request) {
 
     const fredApiKey = process.env.FRED_API_KEY;
 
-    let krResult, usResult;
-    try {
-      krResult = await fetchKoreaEvents(yyyymm);
-    } catch (e) {
-      krResult = { error: '(국내 처리 중 예외) ' + (e && e.message ? e.message : String(e)) };
-    }
-    try {
-      usResult = await fetchUsEvents(yyyymm, fredApiKey);
-    } catch (e) {
-      usResult = { error: '(미국 처리 중 예외) ' + (e && e.message ? e.message : String(e)) };
-    }
+    const [krSettled, usSettled] = await Promise.allSettled([
+      fetchKoreaEvents(yyyymm),
+      fetchUsEvents(yyyymm, fredApiKey)
+    ]);
+    const krResult = krSettled.status === 'fulfilled' ? krSettled.value : { error: '(국내 처리 중 예외) ' + (krSettled.reason && krSettled.reason.message ? krSettled.reason.message : String(krSettled.reason)) };
+    const usResult = usSettled.status === 'fulfilled' ? usSettled.value : { error: '(미국 처리 중 예외) ' + (usSettled.reason && usSettled.reason.message ? usSettled.reason.message : String(usSettled.reason)) };
 
     const events = [].concat((krResult && krResult.events) || [], (usResult && usResult.events) || []);
     events.sort((a, b) => {
