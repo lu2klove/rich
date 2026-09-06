@@ -12,7 +12,7 @@
 
 export const config = { runtime: 'edge' };
 
-const BASE_PATH = '/15086581/v1/uddi:01d5c55c-0586-4b90-a008-9984c7f0ae1e';
+const BASE_PATH = '/api/15086581/v1/uddi:01d5c55c-0586-4b90-a008-9984c7f0ae1e';
 
 export default async function handler(request) {
   try {
