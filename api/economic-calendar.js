@@ -77,7 +77,7 @@ async function fetchUsEvents(yyyymm, apiKey){
       if (!res.ok) return { rel, error: `HTTP ${res.status}: ${text.slice(0,150)}` };
       const data = JSON.parse(text);
       const dates = Array.isArray(data.release_dates) ? data.release_dates : [];
-      return { rel, dates };
+      return { rel, dates, rawSample: dates.slice(0, 3), rawCount: dates.length };
     } catch (e) {
       return { rel, error: (e && e.name === 'AbortError') ? '시간 초과' : (e && e.message) };
     }
@@ -107,6 +107,15 @@ async function fetchUsEvents(yyyymm, apiKey){
 
   if (events.length === 0) {
     return { events: [], note: errors.length > 0 ? ('FRED 오류: ' + errors.join(' / ')) : '이번 달 해당 없음' };
+  }
+
+  // 결과가 비정상적으로 많으면(월간 지표인데 지표당 여러 날짜), 진단용으로 원본 응답 일부를 같이 보여줘요
+  if (events.length > US_RELEASES.length * 2) {
+    const sampleInfo = results.map((r) => {
+      if (r.error) return `${r.rel.name}:err`;
+      return `${r.rel.name}:${r.rawCount}건 예시=${JSON.stringify(r.rawSample)}`;
+    }).join(' || ');
+    return { events: events, note: `[진단] 예상보다 결과가 많아요(${events.length}건). ` + sampleInfo };
   }
   return { events };
 }
