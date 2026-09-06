@@ -84,10 +84,17 @@ async function fetchUsEvents(yyyymm, apiKey){
   }));
 
   const events = [];
+  const seenKeys = {};
   const errors = [];
   results.forEach((r) => {
     if (r.error) { errors.push(`${r.rel.name}: ${r.error}`); return; }
     (r.dates || []).forEach((d) => {
+      // FRED가 실제 요청 범위 밖 날짜나 같은 날짜를 여러 번 줄 수 있어서, 여기서 직접
+      // 한 번 더 걸러내요: 요청한 달 범위 안인지 확인 + (날짜+지표명) 중복 제거
+      if (!d.date || d.date < fromDate || d.date > toDate) return;
+      const key = d.date + '|' + r.rel.name;
+      if (seenKeys[key]) return;
+      seenKeys[key] = true;
       events.push({
         date: d.date,
         time: r.rel.time,
