@@ -1296,6 +1296,30 @@
     line-height:17px;
     text-align:center;
   }
+  .econ-badge{
+    position:absolute;
+    bottom:2px;
+    left:2px;
+    width:6px;
+    height:6px;
+    border-radius:50%;
+    background:var(--blue);
+  }
+  .econ-event-box{
+    background:var(--paper-raised);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:12px;
+    margin-bottom:14px;
+  }
+  .econ-event-item{
+    font-size:13px;
+    padding:5px 0;
+    border-bottom:1px solid var(--line);
+  }
+  .econ-event-item:last-of-type{
+    border-bottom:none;
+  }
   @media (prefers-reduced-motion: no-preference){
     .cell.stampfx{
       animation:stampin .28s ease-out;
@@ -5362,6 +5386,25 @@ window.addEventListener('error', function(ev){
     });
   }
 
+  var economicCalendarCache = {}; // { '202609': [{date, name, agency, cycle}, ...] }
+  async function fetchEconomicCalendar(yyyymm){
+    if(economicCalendarCache[yyyymm]) return economicCalendarCache[yyyymm];
+    try{
+      var res = await fetch('/api/economic-calendar?yyyymm=' + yyyymm);
+      var data = await res.json();
+      if(!res.ok || data.error){ return []; }
+      economicCalendarCache[yyyymm] = data.events || [];
+      return economicCalendarCache[yyyymm];
+    }catch(e){
+      return [];
+    }
+  }
+  function getEconomicEventsForDate(ds){
+    var yyyymm = ds.slice(0,4) + ds.slice(5,7);
+    var events = economicCalendarCache[yyyymm] || [];
+    return events.filter(function(ev){ return ev.date === ds; });
+  }
+
   function renderStampGrid(justStampedToday){
     var now = new Date();
     var displayDate = new Date(now.getFullYear(), now.getMonth() + calendarOffset, 1);
@@ -5409,10 +5452,26 @@ window.addEventListener('error', function(ev){
         badge.textContent = dayEntry.mood ? dayEntry.mood : '✓';
         cell.appendChild(badge);
       }
+      var dayEconEvents = getEconomicEventsForDate(ds);
+      if(dayEconEvents.length > 0){
+        var econBadge = document.createElement('span');
+        econBadge.className = 'econ-badge';
+        econBadge.title = dayEconEvents.length + '건의 주요 지표 발표';
+        cell.appendChild(econBadge);
+      }
       grid.appendChild(cell);
     }
 
     document.getElementById('nextMonthBtn').disabled = (calendarOffset >= 0);
+
+    var yyyymmKey = y + pad(m+1);
+    if(!economicCalendarCache[yyyymmKey]){
+      fetchEconomicCalendar(yyyymmKey).then(function(){
+        if(calendarOffset === (y - now.getFullYear())*12 + (m - now.getMonth())){
+          renderStampGrid(false);
+        }
+      });
+    }
   }
 
   function renderStats(){
@@ -6085,6 +6144,20 @@ window.addEventListener('error', function(ev){
     html += '<span class="day-detail-date">'+niceDate(ds)+'</span>';
     html += '<button class="recordbtn" id="dayRecordBtn" type="button">기록하기</button>';
     html += '</div>';
+
+    var dayEconEvents = getEconomicEventsForDate(ds);
+    if(dayEconEvents.length > 0){
+      html += '<div class="econ-event-box">';
+      html += '<p class="field-label field-label-strong">📅 이 날의 주요 지표 발표 (국내)</p>';
+      dayEconEvents.forEach(function(ev){
+        html += '<div class="econ-event-item"><b>'+escapeHtml(ev.name)+'</b>';
+        if(ev.agency) html += ' <span style="color:var(--ink-faint);">· '+escapeHtml(ev.agency)+'</span>';
+        if(ev.cycle) html += ' <span style="color:var(--ink-faint);">('+escapeHtml(ev.cycle)+')</span>';
+        html += '</div>';
+      });
+      html += '<p class="savehint" style="margin-top:4px;">공공데이터포털 제공 · 시각 정보 없이 날짜만 제공돼요</p>';
+      html += '</div>';
+    }
 
     if(dayEntries.length === 0){
       html += '<p class="empty-inline">이 날은 아직 기록이 없어요.</p>';
