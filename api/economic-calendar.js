@@ -34,11 +34,11 @@ export default async function handler(request) {
     const fromDate = `${year}-${month}-01`;
     const toDate = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
 
-    // odcloud API의 조건필터 문법: cond[필드명::연산자]=값
+    // cond[] 필터 문법(한글 필드명 인코딩 이슈 등)을 피하기 위해,
+    // 전체 데이터를 한 번에 받아서 이 함수 안에서 직접 날짜 범위로 걸러내요.
+    // (전체 약 1,363건 수준이라 한 번에 받아도 부담 없어요)
     const url = `https://api.odcloud.kr${BASE_PATH}`
-      + `?page=1&perPage=200&returnType=JSON`
-      + `&cond[공표예정일::GTE]=${fromDate}`
-      + `&cond[공표예정일::LTE]=${toDate}`
+      + `?page=1&perPage=2000&returnType=JSON`
       + `&serviceKey=${encodeURIComponent(serviceKey)}`;
 
     const res = await fetch(url);
@@ -46,7 +46,7 @@ export default async function handler(request) {
 
     if (!res.ok) {
       return Response.json(
-        { error: `공공데이터포털 응답 오류(HTTP ${res.status})`, raw: rawText.slice(0, 300) },
+        { error: `공공데이터포털 응답 오류(HTTP ${res.status})`, raw: rawText.slice(0, 500) },
         { status: res.status }
       );
     }
@@ -55,12 +55,16 @@ export default async function handler(request) {
     try {
       data = JSON.parse(rawText);
     } catch (e) {
-      return Response.json({ error: '응답을 JSON으로 해석하지 못했어요.', raw: rawText.slice(0, 300) }, { status: 500 });
+      return Response.json({ error: '응답을 JSON으로 해석하지 못했어요.', raw: rawText.slice(0, 500) }, { status: 500 });
     }
 
-    const rows = Array.isArray(data.data) ? data.data : [];
+    const allRows = Array.isArray(data.data) ? data.data : [];
+    const rows = allRows.filter((r) => {
+      const d = r['공표예정일'];
+      return d && d >= fromDate && d <= toDate;
+    });
+
     const events = rows
-      .filter((r) => r['공표예정일'])
       .map((r) => ({
         date: r['공표예정일'],
         name: r['통계명'] || '',
@@ -69,7 +73,7 @@ export default async function handler(request) {
       }))
       .sort((a, b) => (a.date < b.date ? -1 : 1));
 
-    return Response.json({ yyyymm: yyyymm, count: events.length, events: events });
+    return Response.json({ yyyymm: yyyymm, count: events.length, totalRowsFetched: allRows.length, events: events });
   } catch (err) {
     return Response.json({ error: err.message || '알 수 없는 오류' }, { status: 500 });
   }
