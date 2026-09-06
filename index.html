@@ -5392,7 +5392,14 @@ window.addEventListener('error', function(ev){
   async function fetchEconomicCalendar(yyyymm){
     if(economicCalendarCache[yyyymm]) return economicCalendarCache[yyyymm];
     try{
-      var res = await fetch('/api/economic-calendar?yyyymm=' + yyyymm);
+      var controller = new AbortController();
+      var timeoutId = setTimeout(function(){ controller.abort(); }, 12000);
+      var res;
+      try{
+        res = await fetch('/api/economic-calendar?yyyymm=' + yyyymm, { signal: controller.signal });
+      }finally{
+        clearTimeout(timeoutId);
+      }
       var data = await res.json();
       if(!res.ok || data.error){
         economicCalendarLastError = (data && data.error) ? data.error : ('HTTP ' + res.status);
@@ -5409,7 +5416,7 @@ window.addEventListener('error', function(ev){
       economicCalendarCache[yyyymm] = data.events || [];
       return economicCalendarCache[yyyymm];
     }catch(e){
-      economicCalendarLastError = (e && e.message) ? e.message : String(e);
+      economicCalendarLastError = (e && e.name === 'AbortError') ? '응답 시간 초과(12초)' : ((e && e.message) ? e.message : String(e));
       console.error('[주요일정 오류]', economicCalendarLastError);
       return [];
     }
