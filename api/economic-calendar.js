@@ -185,31 +185,44 @@ async function fetchKoreaEvents(yyyymm){
 }
 
 export default async function handler(request) {
+  let requestUrlForDebug = '';
   try {
-    const { searchParams } = new URL(request.url);
-    const yyyymm = searchParams.get('yyyymm');
+    requestUrlForDebug = String(request.url || '');
+    const yyyymmMatch = requestUrlForDebug.match(/[?&]yyyymm=(\d{6})/);
+    const yyyymm = yyyymmMatch ? yyyymmMatch[1] : null;
 
-    if (!yyyymm || !/^\d{6}$/.test(yyyymm)) {
-      return Response.json({ error: 'yyyymm 파라미터가 필요해요 (YYYYMM 형식)' }, { status: 400 });
+    if (!yyyymm) {
+      return Response.json(
+        { error: 'yyyymm 파라미터가 필요해요 (YYYYMM 형식)', debugUrl: requestUrlForDebug },
+        { status: 400 }
+      );
     }
 
     const fredApiKey = process.env.FRED_API_KEY;
-    const [krResult, usResult] = await Promise.all([
-      fetchKoreaEvents(yyyymm).catch((e) => ({ error: e.message })),
-      fetchUsEvents(yyyymm, fredApiKey).catch((e) => ({ error: e.message }))
-    ]);
 
-    const events = [].concat(krResult.events || [], usResult.events || []);
+    let krResult, usResult;
+    try {
+      krResult = await fetchKoreaEvents(yyyymm);
+    } catch (e) {
+      krResult = { error: '(국내 처리 중 예외) ' + (e && e.message ? e.message : String(e)) };
+    }
+    try {
+      usResult = await fetchUsEvents(yyyymm, fredApiKey);
+    } catch (e) {
+      usResult = { error: '(미국 처리 중 예외) ' + (e && e.message ? e.message : String(e)) };
+    }
+
+    const events = [].concat((krResult && krResult.events) || [], (usResult && usResult.events) || []);
     events.sort((a, b) => {
       if (a.date !== b.date) return a.date < b.date ? -1 : 1;
       return (a.time || '') < (b.time || '') ? -1 : 1;
     });
 
     const notes = [];
-    if (krResult.error) notes.push('국내: ' + krResult.error);
-    if (krResult.note) notes.push('국내: ' + krResult.note);
-    if (usResult.error) notes.push('미국: ' + usResult.error);
-    if (usResult.note) notes.push('미국: ' + usResult.note);
+    if (krResult && krResult.error) notes.push('국내: ' + krResult.error);
+    if (krResult && krResult.note) notes.push('국내: ' + krResult.note);
+    if (usResult && usResult.error) notes.push('미국: ' + usResult.error);
+    if (usResult && usResult.note) notes.push('미국: ' + usResult.note);
 
     return Response.json({
       yyyymm: yyyymm,
@@ -218,6 +231,9 @@ export default async function handler(request) {
       notes: notes.length > 0 ? notes : undefined
     });
   } catch (err) {
-    return Response.json({ error: err.message || '알 수 없는 오류' }, { status: 500 });
+    return Response.json(
+      { error: (err && err.message) || '알 수 없는 오류', debugUrl: requestUrlForDebug },
+      { status: 500 }
+    );
   }
 }
