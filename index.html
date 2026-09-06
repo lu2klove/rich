@@ -5399,7 +5399,12 @@ window.addEventListener('error', function(ev){
         console.error('[주요일정 오류]', economicCalendarLastError, data);
         return [];
       }
-      economicCalendarLastError = '';
+      if(data.notes && data.notes.length > 0){
+        economicCalendarLastError = data.notes.join(' / ');
+        console.warn('[주요일정 부분 실패]', data.notes);
+      }else{
+        economicCalendarLastError = '';
+      }
       economicCalendarCache[yyyymm] = data.events || [];
       return economicCalendarCache[yyyymm];
     }catch(e){
