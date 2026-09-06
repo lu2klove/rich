@@ -14,6 +14,33 @@ export const config = { runtime: 'edge' };
 
 const BASE_PATH = '/api/15086581/v1/uddi:01d5c55c-0586-4b90-a008-9984c7f0ae1e';
 
+// 투자 참고용으로 의미있는 핵심 거시지표만 걸러내는 키워드 화이트리스트.
+// 1,363개 전체 승인통계 중 대부분은 투자와 무관한 부처별 행정통계라,
+// 이 목록에 포함된 이름을 가진 통계만 보여줘요.
+const RELEVANT_KEYWORDS = [
+  '소비자물가', 'CPI',
+  '생산자물가', 'PPI',
+  '수출입동향', '무역수지', '수출동향', '수입동향',
+  '국제수지', '경상수지',
+  '국민소득', 'GNI', '국내총생산', 'GDP',
+  '고용동향', '실업률', '고용률', '경제활동인구',
+  '산업생산', '광공업생산동향', '서비스업동향',
+  '경기동향지수', '경기종합지수',
+  '소매판매동향', '소매판매액',
+  '설비투자동향',
+  '건설수주동향', '건설기성',
+  '기업경기실사지수', 'BSI',
+  '소비자심리지수', 'CCSI',
+  '통화금융', '통화량', 'M2',
+  '가계신용', '가계대출',
+  '외환보유액',
+  '생산자물가지수',
+  '기업경기전망'
+];
+function isRelevantStat(name){
+  return RELEVANT_KEYWORDS.some((kw) => name.includes(kw));
+}
+
 export default async function handler(request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -61,7 +88,8 @@ export default async function handler(request) {
     const allRows = Array.isArray(data.data) ? data.data : [];
     const rows = allRows.filter((r) => {
       const d = r['공표예정일'];
-      return d && d >= fromDate && d <= toDate;
+      const name = r['통계명'] || '';
+      return d && d >= fromDate && d <= toDate && isRelevantStat(name);
     });
 
     const events = rows
