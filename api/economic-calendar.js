@@ -100,10 +100,12 @@ async function fetchUsEvents(yyyymm){
   const month = yyyymm.slice(4, 6);
   const url = `https://www.bls.gov/schedule/${year}/${month}_sched.htm`;
 
-  const res = await fetch(url);
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
+  });
   const html = await res.text();
   if (!res.ok) {
-    return { error: `BLS 응답 오류(HTTP ${res.status})` };
+    return { error: `BLS 응답 오류(HTTP ${res.status})`, note: `응답길이:${html.length}, 앞부분:${html.slice(0,200)}` };
   }
 
   // 캘린더 표 부분의 <td> 셀만 추출
@@ -117,11 +119,14 @@ async function fetchUsEvents(yyyymm){
   const events = [];
   let lastDay = 0;
   let inTargetMonth = false;
+  let dateMatchCount = 0;
+  let boldTagCount = 0;
 
   for (let i = 0; i < cellsHtml.length; i++) {
     const rawCell = cellsHtml[i];
     const dayMatch = rawCell.match(/^\s*(\d{1,2})\s*<br/i);
     if (!dayMatch) continue;
+    dateMatchCount++;
     const day = parseInt(dayMatch[1], 10);
 
     if (day < lastDay) {
@@ -133,6 +138,8 @@ async function fetchUsEvents(yyyymm){
     }
     lastDay = day;
     if (!inTargetMonth) continue;
+
+    if (/<(?:strong|b)>/i.test(rawCell)) boldTagCount++;
 
     // 셀 안에서 <strong>지표명</strong> 뒤에 오는 텍스트(기간/시각)를 짝지어 추출
     const itemRegex = /<(?:strong|b)>([\s\S]*?)<\/(?:strong|b)>([\s\S]*?)(?=<(?:strong|b)>|$)/g;
@@ -153,6 +160,13 @@ async function fetchUsEvents(yyyymm){
         });
       }
     }
+  }
+
+  if (events.length === 0) {
+    return {
+      events: [],
+      note: `BLS 파싱 결과 0건 (td셀:${cellsHtml.length}, 날짜매칭:${dateMatchCount}, 굵은글씨셀:${boldTagCount})`
+    };
   }
   return { events };
 }
@@ -181,6 +195,7 @@ export default async function handler(request) {
     if (krResult.error) notes.push('국내: ' + krResult.error);
     if (krResult.note) notes.push('국내: ' + krResult.note);
     if (usResult.error) notes.push('미국: ' + usResult.error);
+    if (usResult.note) notes.push('미국: ' + usResult.note);
 
     return Response.json({
       yyyymm: yyyymm,
