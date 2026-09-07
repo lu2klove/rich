@@ -4383,6 +4383,9 @@ window.addEventListener('error', function(ev){
         mkrHistory
       );
 
+    var kospi252 = mkrV2Return(mkrHistory,252,'kospi');
+    var kosdaq252 = mkrV2Return(mkrHistory,252,'kosdaq');
+
     /*
      * 직전 점수는 현재 시점에서
      * 1거래일 전의 시장 데이터를 기준으로 계산합니다.
@@ -4502,12 +4505,98 @@ window.addEventListener('error', function(ev){
       kosdaqDd:kosdaqDd,
       kosdaq20:kosdaq20,
       kosdaq60:kosdaq60,
+      kospi252:kospi252,
+      kosdaq252:kosdaq252,
+      kospiCurrent:kospiCurrent,
+      kospiHigh:kospiHigh,
+      kosdaqCurrent:kosdaqCurrent,
+      kosdaqHigh:kosdaqHigh,
 
       previousScore:previousScore,
       previousState:previousState
     };
   }
 
+
+  /* ============================================================
+   * [O] 과열 위험 엔진
+   * 시장위험 V2와 분리하여 폭락 전 과열 신호를 조기 감지합니다.
+   * 과열 점수는 매도 신호가 아닙니다.
+   * ============================================================ */
+
+  var OHR_VERSION = '1.0.0';
+  var OHR_TIERS = [
+    {max:20,emoji:'🟢',label:'낮음',color:'var(--pine)'},
+    {max:40,emoji:'🟡',label:'관찰',color:'var(--olive)'},
+    {max:60,emoji:'🟠',label:'과열 경계',color:'#c97a3d'},
+    {max:80,emoji:'🔴',label:'과열 높음',color:'var(--brick)'},
+    {max:Infinity,emoji:'🚨',label:'극단적 과열',color:'var(--brick)'}
+  ];
+
+  function ohrTier(score){
+    for(var i=0;i<OHR_TIERS.length;i++) if(score < OHR_TIERS[i].max) return OHR_TIERS[i];
+    return OHR_TIERS[OHR_TIERS.length-1];
+  }
+
+  function ohrNearHigh(current,high){
+    if(current==null || high==null || high<=0) return null;
+    return Math.max(0,(1-current/high)*100);
+  }
+
+  function computeOverheatRisk(data){
+    var score=0, available=0, reasons=[];
+    if(data.kospi60!=null && data.kosdaq60!=null){
+      available++; var mid=Math.max(data.kospi60,data.kosdaq60);
+      if(mid>=30){score+=18;reasons.push('최근 60일 상승폭이 매우 큽니다');}
+      else if(mid>=20){score+=13;reasons.push('최근 60일 상승폭이 큽니다');}
+      else if(mid>=12) score+=8; else if(mid>=7) score+=4;
+    }
+    if(data.kospi20!=null && data.kosdaq20!=null){
+      available++; var short=Math.max(data.kospi20,data.kosdaq20);
+      if(short>=15){score+=16;reasons.push('최근 20일 급등 속도가 빠릅니다');}
+      else if(short>=10){score+=12;reasons.push('단기 급등 속도가 높습니다');}
+      else if(short>=6) score+=7; else if(short>=3) score+=3;
+    }
+    var nearK=ohrNearHigh(data.kospiCurrent,data.kospiHigh);
+    var nearQ=ohrNearHigh(data.kosdaqCurrent,data.kosdaqHigh);
+    if(nearK!=null && nearQ!=null){
+      available++; var near=Math.min(nearK,nearQ);
+      if(near<=2){score+=16;reasons.push('주요 지수가 52주 고점에 매우 근접합니다');}
+      else if(near<=5){score+=12;reasons.push('주요 지수가 52주 고점 부근입니다');}
+      else if(near<=8) score+=7; else if(near<=12) score+=3;
+    }
+    if(data.vkospi!=null && data.kospi20!=null && data.kosdaq20!=null){
+      available++; var up=data.kospi20>3 && data.kosdaq20>3;
+      if(up && data.vkospi<18){score+=15;reasons.push('낮은 변동성 속에서 상승이 이어지고 있습니다');}
+      else if(up && data.vkospi<22) score+=9; else if(up && data.vkospi<26) score+=4;
+    }
+    if(data.kospi20!=null && data.kosdaq20!=null && data.kospi60!=null && data.kosdaq60!=null){
+      available++; var rel20=data.kosdaq20-data.kospi20, rel60=data.kosdaq60-data.kospi60;
+      if(rel20>=10 && rel60>=15){score+=15;reasons.push('KOSDAQ 상대 상승폭이 크게 벌어져 쏠림 가능성이 있습니다');}
+      else if(rel20>=6 && rel60>=10){score+=9;reasons.push('KOSDAQ 상대강도가 높습니다');}
+      else if(rel20>=3) score+=4;
+    }
+    if(data.kospi252!=null && data.kosdaq252!=null){
+      available++; var long=Math.max(data.kospi252,data.kosdaq252);
+      if(long>=60){score+=20;reasons.push('1년 누적 상승폭이 매우 큽니다');}
+      else if(long>=40){score+=14;reasons.push('1년 누적 상승폭이 큽니다');}
+      else if(long>=25) score+=8; else if(long>=15) score+=4;
+    }
+    score=Math.round(Math.min(100,score));
+    if(!reasons.length) reasons.push('현재 가격 흐름에서 뚜렷한 과열 신호가 많지 않습니다');
+    return {version:OHR_VERSION,score:score,tier:ohrTier(score),insufficient:available<3,reasons:reasons,nearK:nearK,nearQ:nearQ};
+  }
+
+  function combinedRiskInterpretation(market,overheat){
+    if(market.incomplete) return {emoji:'⚪',label:'시장위험 데이터 부족',reason:'시장위험 V2 계산에 필요한 데이터가 부족합니다.'};
+    if(market.state==='PANIC') return {emoji:'🚨',label:'시장 방어 우선',reason:'현재는 과열보다 실제 시장위험 관리가 우선입니다.'};
+    if(market.state==='PANIC_RECOVERY') return {emoji:'🔵',label:'패닉 후 회복 관찰',reason:'회복 중이지만 성급한 재진입은 피하고 과열점수와 시장위험을 함께 관찰하세요.'};
+    if(market.total>=60 && overheat.score>=60) return {emoji:'🚨',label:'고위험·과열 동시 경계',reason:'시장위험과 과열 위험이 동시에 높습니다. 신규 위험노출 확대보다 포트폴리오 방어가 우선입니다.'};
+    if(overheat.score>=60) return {emoji:'🟠',label:'상승장 과열 경계',reason:'시장 하락 위험은 아직 높지 않지만 상승 속도·고점 근접·쏠림 신호가 커지고 있습니다. 추격매수를 피하고 현금을 점검하세요.'};
+    if(market.total>=60) return {emoji:'🔴',label:'시장위험 우선',reason:'과열 여부보다 변동성·추세·낙폭에 따른 시장위험 관리가 우선입니다.'};
+    if(overheat.score>=40) return {emoji:'🟡',label:'과열 관찰',reason:'상승 흐름은 유지되지만 과열 징후가 일부 나타납니다. 신규 진입은 선별하고 추격매수를 자제하세요.'};
+    return {emoji:'🟢',label:'정상 범위',reason:'시장위험과 과열 위험 모두 현재로서는 특별한 경고 수준이 아닙니다.'};
+  }
 
   /* ============================================================
    * [E] 시장 위험 화면
@@ -4575,6 +4664,8 @@ window.addEventListener('error', function(ev){
 
     var mkr =
       computeMarketRiskV2(data);
+
+    var overheat = computeOverheatRisk(data);
 
     /*
      * 데이터가 부족하면 자동 시세 조회는 기존 동작 유지.
@@ -4764,6 +4855,30 @@ window.addEventListener('error', function(ev){
       ) +
       '</p>';
 
+    html += '</div>';
+
+    /*
+     * 과열 위험
+     */
+    html += '<p class="field-label field-label-strong" style="margin-top:16px;">🔥 과열 위험</p>';
+    html += '<div class="verdict-box">';
+    html += '<p class="verdict-label" style="color:'+overheat.tier.color+';">'+overheat.tier.emoji+' '+overheat.tier.label+'</p>';
+    html += '<p class="verdict-pct" style="margin-top:4px;">'+overheat.score+' / 100</p>';
+    html += '<p style="font-size:12px;color:var(--ink-faint);margin-top:8px;">폭락 예측이 아니라 폭락 전에 나타날 수 있는 상승 과열·고점 근접·쏠림 신호를 조기에 경고합니다.</p>';
+    html += '</div>';
+    html += '<div class="rule-card" style="margin-top:10px;">';
+    html += '<p style="font-size:13px;font-weight:800;">주요 과열 신호</p>';
+    html += '<ul style="margin:8px 0 0 18px;padding:0;color:var(--ink-soft);font-size:12.5px;line-height:1.65;">';
+    overheat.reasons.slice(0,4).forEach(function(r){ html += '<li>'+escapeHtml(r)+'</li>'; });
+    html += '</ul>';
+    if(overheat.nearK!=null && overheat.nearQ!=null) html += '<p class="savehint" style="margin-top:8px;">KOSPI 52주 고점까지 '+overheat.nearK.toFixed(1)+'% · KOSDAQ 52주 고점까지 '+overheat.nearQ.toFixed(1)+'%</p>';
+    html += '</div>';
+
+    var combined = combinedRiskInterpretation(mkr,overheat);
+    html += '<p class="field-label field-label-strong" style="margin-top:16px;">🧭 종합 시장 판단</p>';
+    html += '<div class="rule-card">';
+    html += '<p style="font-size:16px;font-weight:800;">'+combined.emoji+' '+combined.label+'</p>';
+    html += '<p style="font-size:13px;color:var(--ink-soft);line-height:1.6;margin-top:6px;">'+escapeHtml(combined.reason)+'</p>';
     html += '</div>';
 
     /*
@@ -5050,8 +5165,8 @@ window.addEventListener('error', function(ev){
      */
     html +=
       '<p class="savehint" style="margin-top:10px;">' +
-      'V2 엔진: 변동성 30 · KOSPI 추세 30 · KOSDAQ 위험 20 · 위험 확대 속도 20. ' +
-      '시장 상태는 위험점수와 별도로 판단하며 자동 매도 신호가 아닙니다.' +
+      'V2 Market Risk: 변동성 30 · KOSPI 추세 30 · KOSDAQ 위험 20 · 위험 확대 속도 20. ' +
+      '과열 위험은 상승속도·고점근접·저변동 상승·KOSDAQ 상대강도·1년 누적상승을 별도 평가합니다. 자동 매도 신호가 아닙니다.' +
       '</p>';
 
     /*
