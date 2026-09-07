@@ -3467,6 +3467,12 @@ window.addEventListener('error', function(ev){
       color:'var(--pine)',
       reason:'시장 변동성과 추세가 모두 안정적인 상태입니다.'
     },
+    RISK_WATCH: {
+      emoji:'🟡',
+      label:'위험 경계',
+      color:'var(--olive)',
+      reason:'시장위험 점수가 경계 구간에 있습니다. 과열 여부와 관계없이 신규 위험노출을 보수적으로 관리하세요.'
+    },
     VOL_EXPANSION: {
       emoji:'🟡',
       label:'변동성 확대',
@@ -3945,6 +3951,15 @@ window.addEventListener('error', function(ev){
       kosdaqDd:data.kosdaqDd,
       previousState:data.previousState
     });
+
+    /*
+     * 상태 엔진은 '위험의 종류'를 우선 판단하지만,
+     * 패턴상 STABLE이어도 종합 위험점수가 경계 이상이면
+     * 화면에서 안정으로 오해하지 않도록 RISK_WATCH로 승격합니다.
+     */
+    if(state === 'STABLE' && total >= 40){
+      state = 'RISK_WATCH';
+    }
 
     result.state = state;
     result.stateMeta = mkrV2StateMeta(state);
@@ -4727,7 +4742,7 @@ window.addEventListener('error', function(ev){
     var html = '';
 
     html +=
-      '<p class="card-title no-divider" style="margin-top:0;">📊 한국 증시 시장 위험</p>';
+      '<p class="card-title no-divider" style="margin-top:0;">📊 한국 증시 시장 위험 <span style="font-size:10px;color:var(--ink-faint);font-weight:600;">V2 + 과열</span></p>';
 
     /*
      * 원시 시장 데이터
@@ -5331,59 +5346,6 @@ window.addEventListener('error', function(ev){
     }
   }
 
-  async function loadVkospiManual(){
-    await ensureSettingsCacheLoaded();
-    return (settingsCache.vkospiManual != null) ? settingsCache.vkospiManual : null;
-  }
-  async function saveVkospiManual(){
-    settingsCache.vkospiManual = vkospiManualValue;
-    await persistSettingsBlob();
-  }
-  async function loadVkospiFetchedDate(){
-    await ensureSettingsCacheLoaded();
-    return settingsCache.vkospiFetchedDate || null;
-  }
-  async function saveVkospiFetchedDate(){
-    settingsCache.vkospiFetchedDate = vkospiFetchedDate;
-    await persistSettingsBlob();
-  }
-  async function fetchVkospiData(){
-    try{
-      var res = await fetch('/api/krx-vkospi', { cache:'no-store' });
-      var raw = await res.text();
-      var data;
-      try {
-        data = JSON.parse(raw);
-      } catch(parseErr) {
-        var preview = String(raw || '').replace(/\s+/g, ' ').slice(0, 180);
-        return { ok:false, error:'VKOSPI API가 JSON이 아닌 응답을 반환했습니다. API 경로(/api/krx-vkospi) 배포 상태를 확인하세요. 응답: ' + preview };
-      }
-      if(!res.ok || data.error){
-        return { ok:false, error: data.error || ('HTTP ' + res.status) };
-      }
-      vkospiManualValue = data.value;
-      var d = data.basDd;
-      vkospiFetchedDate = d ? (d.slice(4,6)+'/'+d.slice(6,8)) : null;
-      await saveVkospiManual();
-      await saveVkospiFetchedDate();
-      return { ok:true };
-    }catch(e){
-      return { ok:false, error: (e && e.message) ? e.message : String(e) };
-    }
-  }
-  async function fetchMajorQuoteData(){
-    for(var i=0; i<MAJOR_QUOTE_META.length; i++){
-      var idx = MAJOR_QUOTE_META[i];
-      if(idx.manual) continue;
-      try{
-        var res = await fetch('/api/naver-price?index=' + idx.key);
-        var data = await res.json();
-        if(res.ok && !data.error){
-          majorQuoteCache[idx.key] = data;
-        }
-      }catch(e){}
-    }
-  }
   function renderSellPrincipleScreen(){
     var body = document.getElementById('sellPrincipleBody');
     var html = '';
