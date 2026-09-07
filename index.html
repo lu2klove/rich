@@ -5179,8 +5179,15 @@ window.addEventListener('error', function(ev){
   }
   async function fetchVkospiData(){
     try{
-      var res = await fetch('/api/krx-vkospi');
-      var data = await res.json();
+      var res = await fetch('/api/krx-vkospi', { cache:'no-store' });
+      var raw = await res.text();
+      var data;
+      try {
+        data = JSON.parse(raw);
+      } catch(parseErr) {
+        var preview = String(raw || '').replace(/\s+/g, ' ').slice(0, 180);
+        return { ok:false, error:'VKOSPI API가 JSON이 아닌 응답을 반환했습니다. API 경로(/api/krx-vkospi) 배포 상태를 확인하세요. 응답: ' + preview };
+      }
       if(!res.ok || data.error){
         return { ok:false, error: data.error || ('HTTP ' + res.status) };
       }
@@ -5227,8 +5234,15 @@ window.addEventListener('error', function(ev){
   }
   async function fetchVkospiData(){
     try{
-      var res = await fetch('/api/krx-vkospi');
-      var data = await res.json();
+      var res = await fetch('/api/krx-vkospi', { cache:'no-store' });
+      var raw = await res.text();
+      var data;
+      try {
+        data = JSON.parse(raw);
+      } catch(parseErr) {
+        var preview = String(raw || '').replace(/\s+/g, ' ').slice(0, 180);
+        return { ok:false, error:'VKOSPI API가 JSON이 아닌 응답을 반환했습니다. API 경로(/api/krx-vkospi) 배포 상태를 확인하세요. 응답: ' + preview };
+      }
       if(!res.ok || data.error){
         return { ok:false, error: data.error || ('HTTP ' + res.status) };
       }
