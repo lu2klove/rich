@@ -5145,6 +5145,211 @@ window.addEventListener('error', function(ev){
    *
    * ============================================================ */
 
+  var MAJOR_QUOTE_META = [
+    { key:'wti', label:'국제유가(WTI)', icon:'🛢️', unit:'$', unitPos:'prefix', thresholdKey:'wti' },
+    { key:'us10y', label:'미국채 10년물', icon:'🇺🇸', unit:'%', unitPos:'suffix', thresholdKey:'us10y' },
+    { key:'us30y', label:'미국채 30년물', icon:'🇺🇸', unit:'%', unitPos:'suffix', thresholdKey:'us30y' },
+    { key:'fx', label:'환율(USD/KRW)', icon:'💵', unit:'원', unitPos:'suffix', thresholdKey:'fx' },
+    { key:'gold', label:'금시세', icon:'🥇', unit:'$', unitPos:'prefix', thresholdKey:null },
+    { key:'sox', label:'필라델피아반도체지수', icon:'🔌', unit:'', unitPos:'suffix', thresholdKey:null },
+    { key:'btc', label:'비트코인', icon:'🪙', unit:'$', unitPos:'prefix', thresholdKey:null },
+    { key:'vix', label:'변동성지수(VIX)', icon:'🌀', unit:'', unitPos:'suffix', thresholdKey:null, bands:VIX_BANDS },
+    { key:'vkospi', label:'VKOSPI', icon:'🌀', unit:'', unitPos:'suffix', thresholdKey:null, bands:VKOSPI_BANDS, manual:true }
+  ];
+  var majorQuoteCache = {};
+  var VKOSPI_MANUAL_KEY = 'investment:vkospimanual';
+  var VKOSPI_MANUAL_LOCAL_KEY = 'investment_journal_vkospimanual_v1';
+  var vkospiManualValue = null;
+  var vkospiFetchedDate = null;
+  async function loadVkospiManual(){
+    await ensureSettingsCacheLoaded();
+    return (settingsCache.vkospiManual != null) ? settingsCache.vkospiManual : null;
+  }
+  async function saveVkospiManual(){
+    settingsCache.vkospiManual = vkospiManualValue;
+    await persistSettingsBlob();
+  }
+  async function loadVkospiFetchedDate(){
+    await ensureSettingsCacheLoaded();
+    return settingsCache.vkospiFetchedDate || null;
+  }
+  async function saveVkospiFetchedDate(){
+    settingsCache.vkospiFetchedDate = vkospiFetchedDate;
+    await persistSettingsBlob();
+  }
+  async function fetchVkospiData(){
+    try{
+      var res = await fetch('/api/krx-vkospi');
+      var data = await res.json();
+      if(!res.ok || data.error){
+        return { ok:false, error: data.error || ('HTTP ' + res.status) };
+      }
+      vkospiManualValue = data.value;
+      var d = data.basDd;
+      vkospiFetchedDate = d ? (d.slice(4,6)+'/'+d.slice(6,8)) : null;
+      await saveVkospiManual();
+      await saveVkospiFetchedDate();
+      return { ok:true };
+    }catch(e){
+      return { ok:false, error: (e && e.message) ? e.message : String(e) };
+    }
+  }
+
+  async function fetchMajorQuoteData(){
+    for(var i=0; i<MAJOR_QUOTE_META.length; i++){
+      var idx = MAJOR_QUOTE_META[i];
+      if(idx.manual) continue;
+      try{
+        var res = await fetch('/api/naver-price?index=' + idx.key);
+        var data = await res.json();
+        if(res.ok && !data.error){
+          majorQuoteCache[idx.key] = data;
+        }
+      }catch(e){}
+    }
+  }
+
+  async function loadVkospiManual(){
+    await ensureSettingsCacheLoaded();
+    return (settingsCache.vkospiManual != null) ? settingsCache.vkospiManual : null;
+  }
+  async function saveVkospiManual(){
+    settingsCache.vkospiManual = vkospiManualValue;
+    await persistSettingsBlob();
+  }
+  async function loadVkospiFetchedDate(){
+    await ensureSettingsCacheLoaded();
+    return settingsCache.vkospiFetchedDate || null;
+  }
+  async function saveVkospiFetchedDate(){
+    settingsCache.vkospiFetchedDate = vkospiFetchedDate;
+    await persistSettingsBlob();
+  }
+  async function fetchVkospiData(){
+    try{
+      var res = await fetch('/api/krx-vkospi');
+      var data = await res.json();
+      if(!res.ok || data.error){
+        return { ok:false, error: data.error || ('HTTP ' + res.status) };
+      }
+      vkospiManualValue = data.value;
+      var d = data.basDd;
+      vkospiFetchedDate = d ? (d.slice(4,6)+'/'+d.slice(6,8)) : null;
+      await saveVkospiManual();
+      await saveVkospiFetchedDate();
+      return { ok:true };
+    }catch(e){
+      return { ok:false, error: (e && e.message) ? e.message : String(e) };
+    }
+  }
+  async function fetchMajorQuoteData(){
+    for(var i=0; i<MAJOR_QUOTE_META.length; i++){
+      var idx = MAJOR_QUOTE_META[i];
+      if(idx.manual) continue;
+      try{
+        var res = await fetch('/api/naver-price?index=' + idx.key);
+        var data = await res.json();
+        if(res.ok && !data.error){
+          majorQuoteCache[idx.key] = data;
+        }
+      }catch(e){}
+    }
+  }
+  function renderSellPrincipleScreen(){
+    var body = document.getElementById('sellPrincipleBody');
+    var html = '';
+    html += '<div class="field"><span class="field-label">손절가 (%)</span><input type="text" inputmode="numeric" id="stopLossInput" value="'+sellSettings.stopLossPct+'"></div>';
+    html += '<div class="field" style="margin-bottom:10px;"><span class="field-label">익절가 (%)</span><input type="text" inputmode="numeric" id="takeProfitInput" value="'+sellSettings.takeProfitPct+'"></div>';
+    html += '<button class="savebtn" id="saveSellSettingsBtn" type="button" style="width:100%;">저장</button>';
+    html += '<p class="toast" id="sellSettingsToast"></p>';
+    body.innerHTML = html;
+
+    document.getElementById('saveSellSettingsBtn').addEventListener('click', async function(){
+      var sl = parseFloat(document.getElementById('stopLossInput').value);
+      var tp = parseFloat(document.getElementById('takeProfitInput').value);
+      var t = document.getElementById('sellSettingsToast');
+      if(!(sl >= 0) || !(tp >= 0)){
+        t.style.color = 'var(--brick)';
+        t.textContent = '숫자를 입력해주세요';
+        return;
+      }
+      sellSettings.stopLossPct = sl;
+      sellSettings.takeProfitPct = tp;
+      await saveSellSettings();
+      t.style.color = 'var(--pine)';
+      t.textContent = '저장됐어요';
+      setTimeout(function(){ t.textContent = ''; }, 1500);
+    });
+  }
+  function renderChecklistManageScreen(){
+    var body = document.getElementById('checklistManageBody');
+    var html = '';
+
+    html += '<p class="card-title no-divider" style="margin-top:0;color:var(--brick);">🔴 A. 투자논리 훼손 여부</p>';
+    html += '<p class="savehint" style="margin-top:-6px;">8개 문항(핵심 투자논리·실적 전망·산업 성장성·경쟁우위·펀더멘털·악재의 성격·기대와 현실·대체 투자)으로 고정되어 있고, 각 문항은 3단계로 채점돼요. 핵심 항목(빨간 표시 3개) 중 하나라도 최악이면 총점과 무관하게 매도 우선 검토로 표시돼요.</p>';
+
+    html += '<p class="card-title" style="margin-top:24px;">📌 B. 보유 의사 질문 관리</p>';
+    html += '<p class="savehint" style="margin-top:-6px;">각 질문은 YES / 모르겠다 / NO 3지선다로 표시돼요.</p>';
+    HOLD_CONVICTION_QUESTIONS.forEach(function(q){
+      html += '<div class="checklist-manage-row">';
+      html += '<input type="text" class="holdQEditInput" data-id="'+q.id+'" value="'+escapeHtml(q.text)+'">';
+      html += '<button class="danger holdQDelBtn" data-id="'+q.id+'" type="button">삭제</button>';
+      html += '</div>';
+    });
+    if(HOLD_CONVICTION_QUESTIONS.length === 0){
+      html += '<p class="empty-inline">질문이 없어요. 아래에서 새로 추가해주세요.</p>';
+    }
+    html += '<div class="other-asset-form" style="margin-top:12px;">';
+    html += '<input type="text" id="newHoldQInput" placeholder="새 보유 의사 질문">';
+    html += '<button class="cancelbtn" id="addHoldQBtn" type="button">추가</button>';
+    html += '</div>';
+    html += '<button class="linklike" id="resetHoldQBtn" type="button" style="margin-top:16px;">기본 목록으로 초기화</button>';
+    html += '<div id="resetHoldQConfirm" style="display:none;margin-top:8px;">';
+    html += '<p class="toast" style="color:var(--brick);">기본 질문으로 되돌리고, 추가·수정한 내용은 사라져요.</p>';
+    html += '<button class="cancelbtn" id="resetHoldQConfirmBtn" type="button" style="width:100%;">초기화 확인</button>';
+    html += '</div>';
+
+    body.innerHTML = html;
+
+    document.querySelectorAll('.holdQEditInput').forEach(function(inp){
+      inp.addEventListener('change', async function(){
+        var id = inp.getAttribute('data-id');
+        var q = HOLD_CONVICTION_QUESTIONS.find(function(x){ return x.id === id; });
+        if(q){
+          q.text = inp.value.trim() || q.text;
+          await saveHoldQuestions();
+        }
+      });
+    });
+    document.querySelectorAll('.holdQDelBtn').forEach(function(btn){
+      btn.addEventListener('click', async function(){
+        var id = btn.getAttribute('data-id');
+        HOLD_CONVICTION_QUESTIONS = HOLD_CONVICTION_QUESTIONS.filter(function(x){ return x.id !== id; });
+        Object.keys(investLogicState).forEach(function(t){ delete investLogicState[t].holdAnswers[id]; });
+        await saveHoldQuestions();
+        renderChecklistManageScreen();
+      });
+    });
+    document.getElementById('addHoldQBtn').addEventListener('click', async function(){
+      var inp = document.getElementById('newHoldQInput');
+      var text = inp.value.trim();
+      if(!text) return;
+      HOLD_CONVICTION_QUESTIONS.push({ id:'hq'+Date.now(), text:text });
+      await saveHoldQuestions();
+      renderChecklistManageScreen();
+    });
+    document.getElementById('resetHoldQBtn').addEventListener('click', function(){
+      var box = document.getElementById('resetHoldQConfirm');
+      box.style.display = (box.style.display === 'none') ? 'block' : 'none';
+    });
+    document.getElementById('resetHoldQConfirmBtn').addEventListener('click', async function(){
+      HOLD_CONVICTION_QUESTIONS = makeDefaultHoldQuestions();
+      investLogicState = {};
+      await saveHoldQuestions();
+      renderChecklistManageScreen();
+    });
+  }
+
   function renderCycleDetectScreen(){
     var body = document.getElementById('cycleDetectBody');
     var html = '';
