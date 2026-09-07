@@ -4614,6 +4614,185 @@ window.addEventListener('error', function(ev){
   }
 
   /* ============================================================
+   * [W] 위험 경고 지속성 / 신호 시퀀스
+   *
+   * 목적:
+   * - 현재 위험점수뿐 아니라 '위험 경고가 몇 거래일째인가'를 표시
+   * - 과거 일별 V2 점수를 순차 재계산해 연속 경고 구간을 산출
+   * - 미래 데이터가 현재 판단에 섞이지 않도록 각 날짜까지의
+   *   데이터만 사용합니다.
+   *
+   * 위험 경고 시작 기준:
+   * - 시장위험 점수 40점 이상 (= V2 '주의' 이상)
+   *
+   * 과열 경고 시작 기준:
+   * - 과열 위험 점수 40점 이상 (= '과열 관찰' 이상)
+   * ============================================================ */
+
+  function mkrV2ShortDate(dateStr){
+    if(!dateStr) return '-';
+    var p = String(dateStr).split('-');
+    if(p.length !== 3) return String(dateStr);
+    return Number(p[1]) + '/' + Number(p[2]);
+  }
+
+  function mkrV2HistoricalDayData(history, idx){
+    if(!history || idx < 0 || idx >= history.length) return null;
+
+    var dayHistory = history.slice(0, idx + 1);
+    var cur = dayHistory[dayHistory.length - 1];
+
+    if(!cur) return null;
+
+    var kospiValues = dayHistory
+      .slice(-252)
+      .map(function(x){ return Number(x.kospi); })
+      .filter(function(x){ return isFinite(x) && x > 0; });
+
+    var kosdaqValues = dayHistory
+      .slice(-252)
+      .map(function(x){ return Number(x.kosdaq); })
+      .filter(function(x){ return isFinite(x) && x > 0; });
+
+    var kospiHigh = kospiValues.length ? Math.max.apply(null, kospiValues) : null;
+    var kosdaqHigh = kosdaqValues.length ? Math.max.apply(null, kosdaqValues) : null;
+
+    var kospiDd = kospiHigh != null ?
+      (kospiHigh - Number(cur.kospi)) / kospiHigh * 100 : null;
+
+    var kosdaqDd = kosdaqHigh != null ?
+      (kosdaqHigh - Number(cur.kosdaq)) / kosdaqHigh * 100 : null;
+
+    return {
+      vkospi:Number(cur.vkospi),
+      vkospiPercentile:mkrV2VkospiPercentile(Number(cur.vkospi), dayHistory),
+      vk20:mkrV2Change(dayHistory,20),
+      vk60:mkrV2Change(dayHistory,60),
+      kospiDd:kospiDd,
+      kospi20:mkrV2Return(dayHistory,20,'kospi'),
+      kospi60:mkrV2Return(dayHistory,60,'kospi'),
+      kosdaqDd:kosdaqDd,
+      kosdaq20:mkrV2Return(dayHistory,20,'kosdaq'),
+      kosdaq60:mkrV2Return(dayHistory,60,'kosdaq'),
+      kospi252:mkrV2Return(dayHistory,252,'kospi'),
+      kosdaq252:mkrV2Return(dayHistory,252,'kosdaq'),
+      kospiCurrent:Number(cur.kospi),
+      kospiHigh:kospiHigh,
+      kosdaqCurrent:Number(cur.kosdaq),
+      kosdaqHigh:kosdaqHigh
+    };
+  }
+
+  function mkrV2WarningPersistence(history){
+    var result = {
+      available:false,
+      riskActive:false,
+      riskDays:0,
+      riskStart:null,
+      riskPreviousDays:0,
+      riskPreviousStart:null,
+      overheatActive:false,
+      overheatDays:0,
+      overheatStart:null,
+      lastRiskEnd:null,
+      lastOverheatEnd:null,
+      currentStage:'데이터 부족'
+    };
+
+    if(!history || history.length < 253) return result;
+
+    var previousState = null;
+    var daily = [];
+
+    for(var i=0;i<history.length;i++){
+      var data = mkrV2HistoricalDayData(history,i);
+      if(!data) continue;
+
+      var market = computeMarketRiskV2({
+        vkospi:data.vkospi,
+        vkospiPercentile:data.vkospiPercentile,
+        vk20:data.vk20,
+        vk60:data.vk60,
+        kospiDd:data.kospiDd,
+        kospi20:data.kospi20,
+        kospi60:data.kospi60,
+        kosdaqDd:data.kosdaqDd,
+        kosdaq20:data.kosdaq20,
+        kosdaq60:data.kosdaq60,
+        previousScore:null,
+        previousState:previousState
+      });
+
+      if(!market.incomplete){
+        previousState = market.state;
+        daily.push({
+          date:history[i].date,
+          market:market,
+          overheat:computeOverheatRisk(data)
+        });
+      }
+    }
+
+    if(!daily.length) return result;
+
+    result.available = true;
+    var current = daily[daily.length - 1];
+
+    function consecutiveDays(isWarning){
+      var days = 0;
+      var start = null;
+      for(var j=daily.length-1;j>=0;j--){
+        if(isWarning(daily[j])){
+          days++;
+          start = daily[j].date;
+        }else{
+          break;
+        }
+      }
+      return {days:days,start:start};
+    }
+
+    var riskRun = consecutiveDays(function(x){ return x.market.total >= 40; });
+    var overheatRun = consecutiveDays(function(x){ return x.overheat.score >= 40; });
+
+    result.riskActive = riskRun.days > 0;
+    result.riskDays = riskRun.days;
+    result.riskStart = riskRun.start;
+    result.overheatActive = overheatRun.days > 0;
+    result.overheatDays = overheatRun.days;
+    result.overheatStart = overheatRun.start;
+
+    var riskEndIdx = daily.length - riskRun.days - 1;
+    if(riskEndIdx >= 0){
+      result.lastRiskEnd = daily[riskEndIdx].date;
+      var prevRiskRun = 0;
+      var prevRiskStart = null;
+      for(var k=riskEndIdx;k>=0;k--){
+        if(daily[k].market.total >= 40){
+          prevRiskRun++;
+          prevRiskStart = daily[k].date;
+        }else{
+          break;
+        }
+      }
+      result.riskPreviousDays = prevRiskRun;
+      result.riskPreviousStart = prevRiskStart;
+    }
+
+    var overheatEndIdx = daily.length - overheatRun.days - 1;
+    if(overheatEndIdx >= 0) result.lastOverheatEnd = daily[overheatEndIdx].date;
+
+    if(current.market.state === 'PANIC') result.currentStage = '패닉';
+    else if(current.market.total >= 60) result.currentStage = '위험 확대';
+    else if(current.market.total >= 40) result.currentStage = '위험 경계';
+    else if(current.overheat.score >= 60) result.currentStage = '과열 경계';
+    else if(current.overheat.score >= 40) result.currentStage = '과열 관찰';
+    else result.currentStage = '정상';
+
+    return result;
+  }
+
+  /* ============================================================
    * [E] 시장 위험 화면
    * 기존 renderMarketRiskScreen() 전체 교체
    * ============================================================ */
@@ -4830,6 +5009,11 @@ window.addEventListener('error', function(ev){
     var stateMeta = mkr.stateMeta;
     var direction = mkr.direction;
 
+    var warningPersistence =
+      mkrBackfillRunning ?
+      {available:false,backfill:true} :
+      mkrV2WarningPersistence(mkrHistory);
+
     /*
      * 시장 위험도
      */
@@ -4869,6 +5053,88 @@ window.addEventListener('error', function(ev){
         ''
       ) +
       '</p>';
+
+    html += '</div>';
+
+    /*
+     * 위험 경고 지속
+     */
+    html +=
+      '<p class="field-label field-label-strong" style="margin-top:16px;">⚠️ 위험 경고 지속</p>';
+
+    html += '<div class="rule-card">';
+
+    if(!warningPersistence.available){
+      html +=
+        '<p style="font-size:15px;font-weight:800;">' +
+        (warningPersistence.backfill ? '과거 데이터 백필 중' : '데이터 계산 중') +
+        '</p>';
+      html +=
+        '<p style="font-size:12.5px;color:var(--ink-soft);line-height:1.6;margin-top:6px;">' +
+        (warningPersistence.backfill ?
+          '800거래일 백필이 끝나면 과거 위험 경고 구간을 계산해 현재 경고가 몇 거래일째인지 표시합니다.' :
+          '일별 위험 경고 지속기간을 계산하려면 최소 253거래일의 시장 데이터가 필요합니다.') +
+        '</p>';
+    }else{
+      html +=
+        '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;">' +
+        '<span>시장 위험 경고</span>' +
+        '<b style="font-size:18px;">' +
+        (warningPersistence.riskActive ?
+          warningPersistence.riskDays + '거래일째' :
+          '현재 없음') +
+        '</b>' +
+        '</div>';
+
+      if(warningPersistence.riskActive){
+        html +=
+          '<p class="savehint" style="margin-top:4px;">' +
+          '경고 시작 ' + mkrV2ShortDate(warningPersistence.riskStart) +
+          ' · 기준 40점 이상' +
+          '</p>';
+      }else if(warningPersistence.lastRiskEnd){
+        html +=
+          '<p class="savehint" style="margin-top:4px;">' +
+          '직전 경고 종료 ' + mkrV2ShortDate(warningPersistence.lastRiskEnd) +
+          (warningPersistence.riskPreviousDays > 0 ?
+            ' · 당시 ' + warningPersistence.riskPreviousDays + '거래일 지속' : '') +
+          '</p>';
+      }else{
+        html +=
+          '<p class="savehint" style="margin-top:4px;">현재까지 40점 이상 경고 구간이 없습니다.</p>';
+      }
+
+      html += '<div style="height:1px;background:var(--line);margin:10px 0;"></div>';
+
+      html +=
+        '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;">' +
+        '<span>과열 경고</span>' +
+        '<b>' +
+        (warningPersistence.overheatActive ?
+          warningPersistence.overheatDays + '거래일째' :
+          '현재 없음') +
+        '</b>' +
+        '</div>';
+
+      if(warningPersistence.overheatActive){
+        html +=
+          '<p class="savehint" style="margin-top:4px;">' +
+          '과열 경고 시작 ' + mkrV2ShortDate(warningPersistence.overheatStart) +
+          ' · 기준 40점 이상' +
+          '</p>';
+      }else{
+        html +=
+          '<p class="savehint" style="margin-top:4px;">과열 점수 40점 이상인 연속 경고 구간이 없습니다.</p>';
+      }
+
+      html += '<div style="height:1px;background:var(--line);margin:10px 0;"></div>';
+      html +=
+        '<p style="font-size:12px;color:var(--ink-faint);line-height:1.55;">' +
+        '현재 신호 단계: <b style="color:var(--ink);">' +
+        escapeHtml(warningPersistence.currentStage) +
+        '</b> · 경고 지속일은 거래일 기준입니다.' +
+        '</p>';
+    }
 
     html += '</div>';
 
