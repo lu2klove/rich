@@ -2966,6 +2966,23 @@ window.addEventListener('error', function(ev){
     }, 0);
   }
 
+  // 계좌 필드가 없는 예전 매매기록에, 지금 시점의 종목 전역 계좌값을
+  // "한 번만" 실제로 박아넣어요. 이렇게 안 하고 매번 폴백만 하면,
+  // 나중에 같은 종목을 다른 계좌로 새로 사면서 종목 전역 계좌가 바뀔 때
+  // 예전 기록까지 새 계좌로 덩달아 바뀌어 보이는 문제가 생겨요.
+  async function migrateEntryAccounts(){
+    var changed = false;
+    entries.forEach(function(e){
+      if((e.type === 'buy' || e.type === 'sell') && e.ticker && e.ticker.trim() && e.account == null){
+        e.account = getTickerAccount(e.ticker.trim()) || '';
+        changed = true;
+      }
+    });
+    if(changed){
+      await saveEntries();
+    }
+  }
+
   function computeHoldings(){
     var trades = entries.filter(function(e){
       return (e.type === 'buy' || e.type === 'sell') && e.ticker && e.ticker.trim();
@@ -8401,6 +8418,7 @@ window.addEventListener('error', function(ev){
       entries = await loadEntries();
       otherAssets = await loadOtherAssets();
       tickerRegistry = await loadTickerRegistry();
+      await migrateEntryAccounts();
       currentPrices = await loadCurrentPrices();
       previousPrices = await loadPreviousPrices();
       priceUpdateDates = await loadPriceUpdateDates();
