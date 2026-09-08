@@ -2977,8 +2977,11 @@ window.addEventListener('error', function(ev){
 
     var map = {};
     trades.forEach(function(e){
-      var key = e.ticker.trim();
-      if(!map[key]) map[key] = { qty:0, cost:0 };
+      var tk = e.ticker.trim();
+      // 이 기록 자체에 저장된 계좌를 우선 쓰고, 없으면(예전 기록) 종목에 등록된 계좌로 대체해요.
+      var acct = (e.account != null && e.account !== '') ? e.account : (getTickerAccount(tk) || '');
+      var key = tk + '||' + acct;
+      if(!map[key]) map[key] = { qty:0, cost:0, ticker:tk, account:acct };
       var qty = e.quantity || 0;
       var amt = e.totalAmount || ((e.price && e.quantity) ? e.price * e.quantity : 0);
       if(e.type === 'buy'){
@@ -2996,17 +2999,18 @@ window.addEventListener('error', function(ev){
     var list = Object.keys(map).map(function(k){
       var m = map[k];
       var avgPrice = m.qty > 0 ? (m.cost / m.qty) : 0;
-      var curPrice = currentPrices[k];
+      var curPrice = currentPrices[m.ticker];
       var hasPrice = (curPrice != null && curPrice > 0);
       var marketValue = hasPrice ? curPrice * m.qty : m.cost;
       var profit = hasPrice ? (marketValue - m.cost) : null;
       var profitPct = (hasPrice && m.cost > 0) ? (profit / m.cost * 100) : null;
       return {
-        ticker: k,
+        ticker: m.ticker,
+        account: m.account,
         qty: m.qty,
         totalCost: m.cost,
         avgPrice: avgPrice,
-        category: getTickerCategory(k),
+        category: getTickerCategory(m.ticker),
         currentPrice: hasPrice ? curPrice : null,
         marketValue: marketValue,
         profit: profit,
@@ -3032,7 +3036,7 @@ window.addEventListener('error', function(ev){
     if(mode === 'account'){
       var abuckets = {};
       holdings.forEach(function(h){
-        var acc = getTickerAccount(h.ticker) || '미지정';
+        var acc = h.account || '미지정';
         if(!abuckets[acc]) abuckets[acc] = { amount:0, names:[] };
         abuckets[acc].amount += h.marketValue;
         abuckets[acc].names.push(h.ticker);
@@ -3185,7 +3189,7 @@ window.addEventListener('error', function(ev){
     var withProfit = holdings.filter(function(h){ return h.profitPct != null; });
     var accountMap = {};
     withProfit.forEach(function(h){
-      var acc = getTickerAccount(h.ticker) || '계좌 미지정';
+      var acc = h.account || '계좌 미지정';
       if(!accountMap[acc]) accountMap[acc] = { account:acc, invested:0, profit:0, marketValue:0 };
       accountMap[acc].invested += h.totalCost;
       accountMap[acc].profit += h.profit;
@@ -4649,23 +4653,8 @@ window.addEventListener('error', function(ev){
     };
   }
 
-  function mkrV2WarningPersistence(history){
-    var result = {
-      available:false,
-      riskActive:false,
-      riskDays:0,
-      riskStart:null,
-      riskPreviousDays:0,
-      riskPreviousStart:null,
-      overheatActive:false,
-      overheatDays:0,
-      overheatStart:null,
-      lastRiskEnd:null,
-      lastOverheatEnd:null,
-      currentStage:'데이터 부족'
-    };
-
-    if(!history || history.length < 253) return result;
+  function mkrV2BuildDailySeries(history){
+    if(!history || history.length < 253) return [];
 
     var previousState = null;
     var daily = [];
@@ -4698,6 +4687,28 @@ window.addEventListener('error', function(ev){
         });
       }
     }
+    return daily;
+  }
+
+  function mkrV2WarningPersistence(history){
+    var result = {
+      available:false,
+      riskActive:false,
+      riskDays:0,
+      riskStart:null,
+      riskPreviousDays:0,
+      riskPreviousStart:null,
+      overheatActive:false,
+      overheatDays:0,
+      overheatStart:null,
+      lastRiskEnd:null,
+      lastOverheatEnd:null,
+      currentStage:'데이터 부족'
+    };
+
+    if(!history || history.length < 253) return result;
+
+    var daily = mkrV2BuildDailySeries(history);
 
     if(!daily.length) return result;
 
@@ -4756,6 +4767,87 @@ window.addEventListener('error', function(ev){
     else result.currentStage = '정상';
 
     return result;
+  }
+
+  /* ============================================================
+   * [I] 위험 신호 진행 단계 — 과열→변동성확대→위험경계→위험확대→패닉→패닉회복
+   * 순서로 이어지는 "가장 최근의 위험 에피소드"를 하나의 시퀀스로 보여줘요.
+   * ============================================================ */
+
+  var RISK_STAGE_META = {
+    OVERHEAT:  { emoji:'🔥', label:'과열 경고 시작', color:'#c97a3d' },
+    VOL_EXP:   { emoji:'⚠️', label:'변동성 확대',   color:'var(--olive)' },
+    WATCH:     { emoji:'🟠', label:'위험 경계',     color:'#c97a3d' },
+    EXPANSION: { emoji:'🔴', label:'위험 확대',     color:'var(--brick)' },
+    PANIC:     { emoji:'🚨', label:'패닉',          color:'var(--brick)' },
+    RECOVERY:  { emoji:'🟡', label:'패닉 회복',     color:'var(--olive)' }
+  };
+
+  function classifyDayStage(d){
+    var state = d.market.state;
+    var tierLabel = d.market.tier.label;
+    if(state === 'PANIC_RECOVERY') return 'RECOVERY';
+    if(state === 'PANIC') return 'PANIC';
+    if(state === 'RISK_EXPANSION' || tierLabel === '고위험' || tierLabel === '극단적 위험') return 'EXPANSION';
+    if(tierLabel === '경계' || state === 'RISK_WATCH') return 'WATCH';
+    if(state === 'VOL_EXPANSION' || state === 'HIGH_VOL_UP') return 'VOL_EXP';
+    if(d.overheat.score >= 50) return 'OVERHEAT';
+    return 'NONE';
+  }
+
+  function computeRiskStageSequence(history){
+    var daily = mkrV2BuildDailySeries(history);
+    if(daily.length === 0){
+      return { available:false, stages:[], ongoing:false };
+    }
+
+    var classified = daily.map(function(d){
+      return { date:d.date, stage:classifyDayStage(d) };
+    });
+
+    var n = classified.length;
+    var i = n - 1;
+    while(i >= 0 && classified[i].stage === 'NONE') i--;
+
+    if(i < 0){
+      return { available:true, stages:[], ongoing:false };
+    }
+
+    // 최근 신호가 없던 기간(3일 이내)은 같은 에피소드로 봐서 하루이틀의
+    // 짧은 소강 상태 때문에 흐름이 끊겨 보이지 않게 해요.
+    var episodeEnd = i;
+    var episodeStartIdx = i;
+    var gap = 0;
+    for(var j=i; j>=0; j--){
+      if(classified[j].stage === 'NONE'){
+        gap++;
+        if(gap > 3) break;
+      }else{
+        gap = 0;
+        episodeStartIdx = j;
+      }
+    }
+
+    var episode = classified.slice(episodeStartIdx, episodeEnd + 1);
+
+    var stages = [];
+    var seen = {};
+    episode.forEach(function(c){
+      if(c.stage !== 'NONE' && !seen[c.stage]){
+        seen[c.stage] = true;
+        stages.push({
+          stage: c.stage,
+          date: c.date,
+          meta: RISK_STAGE_META[c.stage]
+        });
+      }
+    });
+
+    return {
+      available: true,
+      stages: stages,
+      ongoing: classified[n-1].stage !== 'NONE'
+    };
   }
 
   /* ============================================================
@@ -4932,6 +5024,42 @@ window.addEventListener('error', function(ev){
       html += '<div class="rule-card" style="margin-top:8px;background:var(--paper-raised);">';
       html += '<p style="font-size:12.5px;color:var(--ink-soft);line-height:1.6;">'+combined.emoji+' <b>지금은 '+escapeHtml(combined.label)+'</b> 구간이에요 — '+escapeHtml(combined.reason)+'</p>';
       html += '</div>';
+    }
+
+    /* ============================================================
+     * ①-2 위험 신호 진행 단계 — "오늘 몇 점"이 아니라 "어느 방향으로
+     * 가고 있는가"를 시간 순서로 보여줘요.
+     * ============================================================ */
+
+    var stageSeq = mkrBackfillRunning ? { available:false } : computeRiskStageSequence(mkrHistory);
+
+    html += '<p class="field-label field-label-strong" style="margin-top:18px;">🧭 위험 신호 진행 단계</p>';
+
+    if(!stageSeq.available){
+      html += '<p class="savehint">이 기능을 쓰려면 최소 253거래일(대략 1년)치 데이터가 필요해요. 아래 "과거 시장 데이터 보강"으로 채울 수 있어요.</p>';
+    }else if(stageSeq.stages.length === 0){
+      html += '<div class="rule-card"><p style="font-size:13px;color:var(--ink-soft);">🟢 최근엔 특별한 위험 신호 흐름이 없었어요.</p></div>';
+    }else{
+      html += '<div class="rule-card">';
+      stageSeq.stages.forEach(function(s, idx){
+        var isLast = (idx === stageSeq.stages.length - 1);
+        html += '<div style="display:flex;align-items:flex-start;gap:10px;'+(isLast?'':'padding-bottom:12px;')+'">';
+        html += '<div style="display:flex;flex-direction:column;align-items:center;">';
+        html += '<div style="width:26px;height:26px;border-radius:50%;background:'+s.meta.color+';display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;">'+s.meta.emoji+'</div>';
+        if(!isLast) html += '<div style="width:2px;flex:1;background:var(--line);margin-top:2px;min-height:14px;"></div>';
+        html += '</div>';
+        html += '<div style="padding-top:2px;">';
+        html += '<p style="font-size:13.5px;font-weight:700;color:'+s.meta.color+';">'+escapeHtml(s.meta.label)+'</p>';
+        html += '<p style="font-size:11.5px;color:var(--ink-faint);margin-top:1px;">'+mkrV2ShortDate(s.date)+'</p>';
+        html += '</div>';
+        html += '</div>';
+      });
+      html += '</div>';
+      if(stageSeq.ongoing){
+        html += '<p class="savehint">🔄 이 흐름이 아직 진행 중이에요.</p>';
+      }else{
+        html += '<p class="savehint">✅ 회복 단계까지 마무리된 최근 흐름이에요.</p>';
+      }
     }
 
     /* ============================================================
@@ -5130,8 +5258,8 @@ window.addEventListener('error', function(ev){
 
   var MAJOR_QUOTE_META = [
     { key:'wti', label:'국제유가(WTI)', icon:'🛢️', unit:'$', unitPos:'prefix', thresholdKey:'wti' },
-    { key:'us10y', label:'미국채 10년물', icon:'🇺🇸', unit:'%', unitPos:'suffix', thresholdKey:'us10y' },
-    { key:'us30y', label:'미국채 30년물', icon:'🇺🇸', unit:'%', unitPos:'suffix', thresholdKey:'us30y' },
+    { key:'us10y', label:'미국채 10년물', icon:flagSvgIcon('US',13), unit:'%', unitPos:'suffix', thresholdKey:'us10y' },
+    { key:'us30y', label:'미국채 30년물', icon:flagSvgIcon('US',13), unit:'%', unitPos:'suffix', thresholdKey:'us30y' },
     { key:'fx', label:'환율(USD/KRW)', icon:'💵', unit:'원', unitPos:'suffix', thresholdKey:'fx' },
     { key:'gold', label:'금시세', icon:'🥇', unit:'$', unitPos:'prefix', thresholdKey:null },
     { key:'sox', label:'필라델피아반도체지수', icon:'🔌', unit:'', unitPos:'suffix', thresholdKey:null },
@@ -5388,7 +5516,7 @@ window.addEventListener('error', function(ev){
 
     var holdingsForStatus = computeHoldings().filter(function(h){ return h.profitPct != null; });
     if(stockStatusAccount){
-      holdingsForStatus = holdingsForStatus.filter(function(h){ return getTickerAccount(h.ticker) === stockStatusAccount; });
+      holdingsForStatus = holdingsForStatus.filter(function(h){ return h.account === stockStatusAccount; });
     }
     if(stockStatusIndexFilter){
       holdingsForStatus = holdingsForStatus.filter(function(h){ return getTickerIndex(h.ticker) === stockStatusIndexFilter; });
@@ -5811,9 +5939,9 @@ window.addEventListener('error', function(ev){
 
   function filterHoldingsByAccount(holdings, accountFilter){
     if(accountFilter === '__unassigned__'){
-      return holdings.filter(function(h){ return !getTickerAccount(h.ticker); });
+      return holdings.filter(function(h){ return !h.account; });
     }else if(accountFilter){
-      return holdings.filter(function(h){ return getTickerAccount(h.ticker) === accountFilter; });
+      return holdings.filter(function(h){ return h.account === accountFilter; });
     }
     return holdings;
   }
@@ -5903,7 +6031,7 @@ window.addEventListener('error', function(ev){
         pageHoldings.forEach(function(h){
         var idxMeta = TICKER_INDEX_META[getTickerIndex(h.ticker)];
         html += '<div class="holding-item">';
-        html += '<div class="holding-top"><span class="holding-name">'+(idxMeta?idxMeta.icon+' ':'')+escapeHtml(h.ticker)+'</span><span class="holding-amt">'+formatWon(h.marketValue)+'원</span></div>';
+        html += '<div class="holding-top"><span class="holding-name">'+(idxMeta?idxMeta.icon+' ':'')+escapeHtml(h.ticker)+(h.account?' <span style="font-size:10.5px;font-weight:600;color:var(--ink-faint);">('+escapeHtml(h.account)+')</span>':'')+'</span><span class="holding-amt">'+formatWon(h.marketValue)+'원</span></div>';
         html += '<div class="holding-sub">'+formatQty(h.qty)+'주 · 평균매입 '+formatWon(h.avgPrice)+'원'+(h.currentPrice!=null?' · 현재가 '+formatWon(h.currentPrice)+'원':'')+'</div>';
         if(h.profit != null){
           var pc = h.profit >= 0 ? 'var(--brick)' : 'var(--blue)';
@@ -5940,10 +6068,10 @@ window.addEventListener('error', function(ev){
         });
         html += '</select>';
         html += '</div>';
-        html += '<select class="accountSelect2" data-ticker="'+escapeHtml(h.ticker)+'">';
+        html += '<select class="accountSelect2" data-ticker="'+escapeHtml(h.ticker)+'" data-account="'+escapeHtml(h.account||'')+'">';
         html += '<option value="">계좌 미지정</option>';
         accounts.forEach(function(acc){
-          var sel = (getTickerAccount(h.ticker) === acc.name) ? ' selected' : '';
+          var sel = (h.account === acc.name) ? ' selected' : '';
           html += '<option value="'+escapeHtml(acc.name)+'"'+sel+'>'+escapeHtml(acc.name)+'</option>';
         });
         html += '</select>';
@@ -6019,10 +6147,17 @@ window.addEventListener('error', function(ev){
     document.querySelectorAll('.accountSelect2').forEach(function(sel){
       sel.addEventListener('change', async function(){
         var ticker = sel.getAttribute('data-ticker');
-        await setTickerAccount(ticker, sel.value);
-        if(portfolioViewMode === 'account'){
-          updatePortfolioSection();
-        }
+        var oldAccount = sel.getAttribute('data-account') || '';
+        var newAccount = sel.value;
+        entries.forEach(function(e){
+          if(e.ticker === ticker && (e.account || '') === oldAccount){
+            e.account = newAccount;
+          }
+        });
+        await saveEntries();
+        await setTickerAccount(ticker, newAccount);
+        updatePortfolioSection();
+        renderAssetScreen();
       });
     });
     document.querySelectorAll('.holding-toggle-btn').forEach(function(btn){
@@ -6803,7 +6938,7 @@ window.addEventListener('error', function(ev){
         var hasUs = dayEconEvents.some(function(ev){ return ev.country === 'US'; });
         var econBadge = document.createElement('span');
         econBadge.className = 'econ-badge';
-        econBadge.textContent = (hasKr?'🇰🇷':'') + (hasUs?'🇺🇸':'');
+        econBadge.innerHTML = (hasKr?flagSvgIcon('KR',10):'') + (hasUs?flagSvgIcon('US',10):'');
         econBadge.title = dayEconEvents.length + '건의 주요 지표 발표';
         cell.appendChild(econBadge);
       }
@@ -7337,6 +7472,30 @@ window.addEventListener('error', function(ev){
     d.textContent = s;
     return d.innerHTML;
   }
+  // 국기 이모지(🇰🇷/🇺🇸)는 PC 환경(특히 Windows)에서 폰트가 없으면
+  // 그림 대신 "KR"/"US" 글자로 표시되는 경우가 있어서, 플랫폼과 무관하게
+  // 항상 똑같이 보이는 작은 인라인 SVG로 대체해요.
+  function flagSvgIcon(country, size){
+    size = size || 14;
+    var h = Math.round(size * 0.72);
+    if(country === 'US'){
+      return '<svg width="'+size+'" height="'+h+'" viewBox="0 0 20 14" style="vertical-align:middle;border-radius:2px;display:inline-block;">'+
+        '<rect width="20" height="14" fill="#B22234"/>'+
+        '<rect y="1.08" width="20" height="1.08" fill="#fff"/>'+
+        '<rect y="3.23" width="20" height="1.08" fill="#fff"/>'+
+        '<rect y="5.38" width="20" height="1.08" fill="#fff"/>'+
+        '<rect y="7.54" width="20" height="1.08" fill="#fff"/>'+
+        '<rect y="9.69" width="20" height="1.08" fill="#fff"/>'+
+        '<rect y="11.85" width="20" height="1.08" fill="#fff"/>'+
+        '<rect width="8" height="7.54" fill="#3C3B6E"/>'+
+        '</svg>';
+    }
+    return '<svg width="'+size+'" height="'+h+'" viewBox="0 0 20 14" style="vertical-align:middle;border-radius:2px;display:inline-block;">'+
+      '<rect width="20" height="14" fill="#fff"/>'+
+      '<circle cx="10" cy="7" r="3.2" fill="#CD2E3A"/>'+
+      '<path d="M10 3.8 A3.2 3.2 0 0 1 10 10.2 A1.6 1.6 0 0 1 10 7 A1.6 1.6 0 0 0 10 3.8 Z" fill="#0047A0"/>'+
+      '</svg>';
+  }
   function tickerToSafeId(ticker){
     // Encodes the full ticker (not just its length) so that different
     // Korean names of the same character count never collide, unlike a
@@ -7460,7 +7619,7 @@ window.addEventListener('error', function(ev){
     document.getElementById('priceInput').value = (e.price != null) ? e.price : '';
     updateTotalLine();
     updateHoldingRef();
-    renderEntryAccountOptions(e.ticker ? getTickerAccount(e.ticker) : '');
+    renderEntryAccountOptions(e.account != null ? e.account : (e.ticker ? getTickerAccount(e.ticker) : ''));
     document.getElementById('newAccountInlineForm').style.display = 'none';
     document.getElementById('memoInput').value = e.memo || '';
     document.getElementById('nextCheckInput').value = e.nextCheck || '';
@@ -7511,7 +7670,7 @@ window.addEventListener('error', function(ev){
       html += '<p class="field-label field-label-strong">📅 이 날의 주요 지표 발표</p>';
       dayEconEvents.forEach(function(ev){
         html += '<div class="econ-event-item">';
-        html += '<span>'+(ev.country==='US'?'🇺🇸':'🇰🇷')+'</span> ';
+        html += '<span>'+flagSvgIcon(ev.country==='US'?'US':'KR',14)+'</span> ';
         if(ev.time) html += '<b style="color:var(--amber);">'+escapeHtml(ev.time)+'</b> ';
         html += '<b>'+escapeHtml(ev.name)+'</b>';
         if(ev.agency) html += ' <span style="color:var(--ink-faint);">· '+escapeHtml(ev.agency)+'</span>';
@@ -7714,6 +7873,9 @@ window.addEventListener('error', function(ev){
       return out;
     }).filter(function(x){ return x != null; });
 
+    var acctValForPayload = document.getElementById('entryAccountSelect').value;
+    if(acctValForPayload === '__new__') acctValForPayload = '';
+
     var payload = {
       date: dateStr,
       type: selected.type,
@@ -7724,6 +7886,7 @@ window.addEventListener('error', function(ev){
       market: selected.market,
       mood: selected.mood,
       memo: memo,
+      account: acctValForPayload,
       principles: principlesArray,
       nextCheck: document.getElementById('nextCheckInput').value.trim(),
       updatedAt: new Date().toISOString()
