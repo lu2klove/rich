@@ -5241,7 +5241,6 @@ window.addEventListener('error', function(ev){
       }else{
         html += '<p class="savehint">✅ 회복 단계까지 마무리된 최근 흐름이에요.</p>';
       }
-      html += '<p class="savehint" style="color:var(--blue);">[진단] ongoing='+stageSeq.ongoing+', currentStageKey='+stageSeq.currentStageKey+', 오늘 실제 분류='+classifyDayStage(mkrV2BuildDailySeries(mkrHistory).slice(-1)[0] || {market:{state:'STABLE',tier:{label:'안정'}},overheat:{score:0}})+'</p>';
     }
 
     /* ============================================================
