@@ -6461,8 +6461,12 @@ window.addEventListener('error', function(ev){
         var symbolInp = btn.closest('.symbol-row').querySelector('.symbolInput2');
         var symbol = symbolInp ? symbolInp.value.trim() : '';
         if(!symbol){
-          symbol = ticker;
-          if(symbolInp) symbolInp.value = ticker;
+          // 예전엔 여기서 종목명(예: "뉴스케일파워")을 그대로 심볼처럼 써버려서,
+          // 해외종목인데 한글이름 때문에 국내종목으로 오인해 조회가 실패했었어요.
+          // 이제는 심볼을 반드시 직접 입력하도록 안내만 하고 조회는 시도하지 않아요.
+          statusEl.style.color = 'var(--brick)';
+          statusEl.textContent = '먼저 위 칸에 정확한 종목코드나 심볼을 입력해주세요. (국내: 종목코드 6자리 또는 종목명 · 해외: 야후 파이낸스 티커, 예: SMR, AAPL)';
+          return;
         }
         await setTickerSymbol(ticker, symbol);
         statusEl.style.color = 'var(--ink-soft)';
