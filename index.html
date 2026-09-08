@@ -2983,6 +2983,151 @@ window.addEventListener('error', function(ev){
     }
   }
 
+  var heatmapFilterAccount = '';
+
+  // 정사각형에 가까운 타일로 배치하는 표준 트리맵 알고리즘(squarified treemap).
+  // items: [{value:number, ...}] -> 반환: 각 항목에 {x,y,w,h}가 추가된 배열
+  function computeTreemapLayout(items, x, y, w, h){
+    var positive = items.filter(function(i){ return i.value > 0; });
+    var total = positive.reduce(function(s,i){ return s+i.value; }, 0);
+    if(total <= 0 || positive.length === 0) return [];
+    var scale = (w*h) / total;
+    var sorted = positive.slice().sort(function(a,b){ return b.value - a.value; });
+    var result = [];
+    var rect = {x:x, y:y, w:w, h:h};
+
+    function worst(row, length){
+      if(row.length === 0) return Infinity;
+      var areas = row.map(function(r){ return r.value*scale; });
+      var sum = areas.reduce(function(s,a){ return s+a; }, 0);
+      var maxA = Math.max.apply(null, areas);
+      var minA = Math.min.apply(null, areas);
+      return Math.max((length*length*maxA)/(sum*sum), (sum*sum)/(length*length*minA));
+    }
+
+    function layoutRow(row, rect, horizontal){
+      var areas = row.map(function(r){ return r.value*scale; });
+      var sum = areas.reduce(function(s,a){ return s+a; }, 0);
+      if(horizontal){
+        var rowH = sum / rect.w;
+        var cx = rect.x;
+        row.forEach(function(r){
+          var rw = (r.value*scale) / rowH;
+          result.push(Object.assign({}, r, {x:cx, y:rect.y, w:rw, h:rowH}));
+          cx += rw;
+        });
+        return { x:rect.x, y:rect.y+rowH, w:rect.w, h:rect.h-rowH };
+      }else{
+        var rowW = sum / rect.h;
+        var cy = rect.y;
+        row.forEach(function(r){
+          var rh = (r.value*scale) / rowW;
+          result.push(Object.assign({}, r, {x:rect.x, y:cy, w:rowW, h:rh}));
+          cy += rh;
+        });
+        return { x:rect.x+rowW, y:rect.y, w:rect.w-rowW, h:rect.h };
+      }
+    }
+
+    var remaining = sorted.slice();
+    while(remaining.length > 0){
+      var horizontal = rect.w >= rect.h;
+      var length = horizontal ? rect.w : rect.h;
+      var currentRow = [remaining[0]];
+      var currentWorst = worst(currentRow, length);
+      var idx = 1;
+      while(idx < remaining.length){
+        var testRow = currentRow.concat([remaining[idx]]);
+        var testWorst = worst(testRow, length);
+        if(testWorst <= currentWorst){
+          currentRow = testRow;
+          currentWorst = testWorst;
+          idx++;
+        }else{
+          break;
+        }
+      }
+      rect = layoutRow(currentRow, rect, horizontal);
+      remaining = remaining.slice(currentRow.length);
+    }
+    return result;
+  }
+
+  // 당일 등락률 기준 초록(상승)~빨강(하락) 색상. 데이터 없으면 회색.
+  function heatmapColor(pct){
+    if(pct == null || isNaN(pct)) return '#555b63';
+    var capped = Math.max(-5, Math.min(5, pct));
+    var t = Math.abs(capped) / 5;
+    if(capped >= 0){
+      var r1 = Math.round(30 + (1-t)*25);
+      var g1 = Math.round(70 + t*70);
+      var b1 = Math.round(55 + (1-t)*15);
+      return 'rgb('+r1+','+g1+','+b1+')';
+    }else{
+      var r2 = Math.round(110 + t*70);
+      var g2 = Math.round(40 - t*15);
+      var b2 = Math.round(48 - t*10);
+      return 'rgb('+r2+','+g2+','+b2+')';
+    }
+  }
+
+  function renderHeatmapHTML(holdings){
+    var hmHoldings = filterHoldingsByAccount(holdings, heatmapFilterAccount)
+      .filter(function(h){ return h.marketValue > 0; });
+
+    var html = '<div class="heatmap-wrap">';
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">';
+    html += '<p class="card-title no-divider" style="margin:0;">🗺️ 자산 히트맵</p>';
+    if(accounts.length > 0){
+      html += '<select class="holdings-filter-select" id="heatmapAccountSelect">';
+      html += '<option value="">전체 보유</option>';
+      accounts.forEach(function(acc){
+        var isSel = (heatmapFilterAccount === acc.name) ? ' selected' : '';
+        html += '<option value="'+escapeHtml(acc.name)+'"'+isSel+'>'+escapeHtml(acc.name)+'</option>';
+      });
+      html += '<option value="__unassigned__"'+(heatmapFilterAccount==='__unassigned__'?' selected':'')+'>계좌 미지정</option>';
+      html += '</select>';
+    }
+    html += '</div>';
+
+    if(hmHoldings.length === 0){
+      html += '<p class="empty-inline">표시할 종목이 없어요.</p></div>';
+      return html;
+    }
+
+    var VW = 340, VH = 260;
+    var items = hmHoldings.map(function(h){
+      var prevClose = previousPrices[h.ticker];
+      var dayPct = (h.currentPrice != null && prevClose != null && prevClose > 0)
+        ? (h.currentPrice - prevClose) / prevClose * 100
+        : null;
+      return { value: h.marketValue, ticker: h.ticker, dayPct: dayPct, marketValue: h.marketValue };
+    });
+    var laid = computeTreemapLayout(items, 0, 0, VW, VH);
+
+    html += '<div style="position:relative;width:100%;padding-top:'+(VH/VW*100)+'%;border-radius:10px;overflow:hidden;background:#2b2f36;">';
+    html += '<div style="position:absolute;inset:0;">';
+    laid.forEach(function(t){
+      var leftPct = (t.x/VW*100), topPct = (t.y/VH*100), wPct = (t.w/VW*100), hPct = (t.h/VH*100);
+      var bg = heatmapColor(t.dayPct);
+      var tiny = (t.w < 46 || t.h < 34);
+      html += '<div style="position:absolute;left:'+leftPct+'%;top:'+topPct+'%;width:'+wPct+'%;height:'+hPct+'%;background:'+bg+';border:1px solid rgba(0,0,0,0.25);box-sizing:border-box;padding:5px 6px;overflow:hidden;color:#fff;">';
+      if(!tiny){
+        html += '<p style="font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0;">'+escapeHtml(t.ticker)+'</p>';
+        html += '<p style="font-size:12px;font-weight:800;margin:2px 0 0;">'+(t.dayPct!=null?((t.dayPct>=0?'+':'')+t.dayPct.toFixed(1)+'%'):'-')+'</p>';
+        if(t.h > 55){
+          html += '<p style="font-size:10.5px;opacity:0.85;margin:2px 0 0;">'+formatWon(t.marketValue)+'원</p>';
+        }
+      }else{
+        html += '<p style="font-size:10px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0;">'+escapeHtml(t.ticker)+'</p>';
+      }
+      html += '</div>';
+    });
+    html += '</div></div>';
+    html += '</div>';
+    return html;
+  }
+
   function computeHoldings(){
     var trades = entries.filter(function(e){
       return (e.type === 'buy' || e.type === 'sell') && e.ticker && e.ticker.trim();
@@ -5100,6 +5245,7 @@ window.addEventListener('error', function(ev){
       }else{
         html += '<p class="savehint">✅ 회복 단계까지 마무리된 최근 흐름이에요.</p>';
       }
+      html += '<p class="savehint" style="color:var(--blue);">[진단] ongoing='+stageSeq.ongoing+', currentStageKey='+stageSeq.currentStageKey+', 오늘 실제 분류='+classifyDayStage(mkrV2BuildDailySeries(mkrHistory).slice(-1)[0] || {market:{state:'STABLE',tier:{label:'안정'}},overheat:{score:0}})+'</p>';
     }
 
     /* ============================================================
@@ -6024,6 +6170,8 @@ window.addEventListener('error', function(ev){
     }
     html += '</div>';
 
+    html += '<div id="heatmapSection">'+renderHeatmapHTML(holdings)+'</div>';
+
     html += '<div id="portfolioSection">'+renderPortfolioSectionHTML(holdings)+'</div>';
 
     html += '<div class="ios-list" style="margin-top:14px;">';
@@ -6388,6 +6536,17 @@ window.addEventListener('error', function(ev){
         holdingsPage = 1;
         renderAssetScreen();
       });
+    }
+    function handleHeatmapAccountChange(){
+      heatmapFilterAccount = this.value;
+      var section = document.getElementById('heatmapSection');
+      if(section) section.innerHTML = renderHeatmapHTML(computeHoldings());
+      var newSel = document.getElementById('heatmapAccountSelect');
+      if(newSel) newSel.addEventListener('change', handleHeatmapAccountChange);
+    }
+    var heatmapAccountSelectEl = document.getElementById('heatmapAccountSelect');
+    if(heatmapAccountSelectEl){
+      heatmapAccountSelectEl.addEventListener('change', handleHeatmapAccountChange);
     }
     document.querySelectorAll('[data-hpage]').forEach(function(btn){
       btn.addEventListener('click', function(){
