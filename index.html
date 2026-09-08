@@ -1955,9 +1955,56 @@
   <div class="asset-header">
     <button class="asset-back" id="assetBackBtn" type="button">‹ 뒤로</button>
     <span class="asset-title">📊 자산관리</span>
-    <span style="width:44px;"></span>
+    <button class="cancelbtn" id="assetSettingsBtn" type="button" style="width:44px;height:36px;padding:0;font-size:16px;">⚙️</button>
   </div>
   <div class="asset-body" id="assetBody"></div>
+</div>
+
+<div class="asset-screen" id="dividendScreen">
+  <div class="asset-header">
+    <button class="asset-back" id="dividendBackBtn" type="button">‹ 뒤로</button>
+    <span class="asset-title">💰 배당관리</span>
+    <span style="width:44px;"></span>
+  </div>
+  <div class="asset-body" id="dividendBody"></div>
+</div>
+
+<div class="settings-backdrop" id="assetSettingsBackdrop" style="z-index:960;"></div>
+<div class="settings-sheet" id="assetSettingsSheet" style="z-index:961;">
+  <div class="settings-header">
+    <span class="settings-title">⚙️ 자산관리 설정</span>
+    <button class="settings-close" id="assetSettingsCloseBtn" type="button" aria-label="닫기">✕</button>
+  </div>
+  <button class="cancelbtn" id="goToDividendBtn" type="button" style="width:100%;text-align:left;">💰 배당관리 ›</button>
+</div>
+
+<div class="settings-backdrop" id="dividendFormBackdrop" style="z-index:960;"></div>
+<div class="settings-sheet" id="dividendFormSheet" style="z-index:961;">
+  <div class="settings-header">
+    <span class="settings-title" id="dividendFormTitle">💰 배당금 등록</span>
+    <button class="settings-close" id="dividendFormCloseBtn" type="button" aria-label="닫기">✕</button>
+  </div>
+  <div class="field">
+    <span class="field-label field-label-strong">종목명</span>
+    <select id="dividendTickerSelect"></select>
+  </div>
+  <div class="field">
+    <span class="field-label field-label-strong">배당일</span>
+    <input type="date" id="dividendDateInput">
+  </div>
+  <div class="field">
+    <span class="field-label field-label-strong">배당금액(원)</span>
+    <input type="number" id="dividendAmountInput" placeholder="예: 15000">
+  </div>
+  <div class="field">
+    <span class="field-label field-label-strong">비고</span>
+    <input type="text" id="dividendMemoInput" placeholder="선택 입력">
+  </div>
+  <div class="row2">
+    <button class="cancelbtn" id="dividendFormCancelBtn" type="button">취소</button>
+    <button class="savebtn" id="dividendFormSaveBtn" type="button">저장</button>
+  </div>
+  <button class="danger" id="dividendFormDeleteBtn" type="button" style="width:100%;margin-top:10px;display:none;">이 배당기록 삭제</button>
 </div>
 
 <div class="asset-screen" id="investJudgmentScreen">
@@ -3122,6 +3169,38 @@ window.addEventListener('error', function(ev){
     html += '</div></div>';
     html += '</div>';
     return html;
+  }
+
+  /* ============================================================
+   * 배당관리
+   * 매매기록과 같은 entries 테이블을 그대로 써요 (type:'dividend').
+   * ============================================================ */
+  var dividendPage = 1;
+  var DIVIDEND_PAGE_SIZE = 10;
+  var editingDividendId = null;
+  var dividendStatsYear = 'all';
+
+  function computeDividendList(){
+    return entries
+      .filter(function(e){ return e.type === 'dividend'; })
+      .slice()
+      .sort(function(a,b){ return a.date < b.date ? 1 : -1; });
+  }
+
+  function computeDividendStats(list, year){
+    var filtered = (year === 'all') ? list : list.filter(function(d){ return d.date && d.date.slice(0,4) === String(year); });
+    var byTicker = {};
+    var order = [];
+    filtered.forEach(function(d){
+      if(!byTicker[d.ticker]){ byTicker[d.ticker] = 0; order.push(d.ticker); }
+      byTicker[d.ticker] += (d.amount || 0);
+    });
+    var rows = order.map(function(t){ return { ticker:t, amount:byTicker[t] }; });
+    rows.sort(function(a,b){ return b.amount - a.amount; });
+    var total = rows.reduce(function(s,r){ return s + r.amount; }, 0);
+    var highest = rows.length > 0 ? rows[0] : null;
+    var lowest = rows.length > 0 ? rows[rows.length-1] : null;
+    return { rows: rows, total: total, highest: highest, lowest: lowest, count: filtered.length };
   }
 
   function computeHoldings(){
@@ -6127,6 +6206,181 @@ window.addEventListener('error', function(ev){
     return holdings;
   }
 
+  function renderDividendScreen(){
+    var body = document.getElementById('dividendBody');
+    if(!body) return;
+
+    var list = computeDividendList();
+    var html = '';
+
+    html += '<button class="cancelbtn" id="addDividendBtn" type="button" style="width:100%;">+ 배당금 등록</button>';
+
+    if(list.length === 0){
+      html += '<p class="empty-inline" style="margin-top:14px;">등록된 배당 기록이 없어요.</p>';
+    }else{
+      var totalPages = Math.ceil(list.length / DIVIDEND_PAGE_SIZE);
+      if(dividendPage > totalPages) dividendPage = totalPages;
+      if(dividendPage < 1) dividendPage = 1;
+      var startIdx = (dividendPage-1) * DIVIDEND_PAGE_SIZE;
+      var pageItems = list.slice(startIdx, startIdx + DIVIDEND_PAGE_SIZE);
+
+      html += '<p class="card-title" style="margin-top:16px;">배당 목록 ('+list.length+'건)</p>';
+      pageItems.forEach(function(d){
+        html += '<div class="record-row" data-dividend-row="'+d.id+'" style="cursor:pointer;">';
+        html += '<div class="holding-top"><span class="holding-name">'+escapeHtml(d.ticker)+'</span><span class="holding-amt">'+formatWon(d.amount||0)+'원</span></div>';
+        html += '<p class="record-sub">'+niceDate(d.date)+(d.memo?' · '+escapeHtml(d.memo):'')+'</p>';
+        html += '</div>';
+      });
+
+      if(totalPages > 1){
+        var groupStart = getPageGroupStart(dividendPage);
+        var groupEnd = Math.min(groupStart+4, totalPages);
+        html += '<div class="pager" style="margin-top:10px;">';
+        if(groupStart > 1) html += '<button class="pagebtn pagegroup" data-div-goto="'+(groupStart-1)+'" type="button">‹ 이전</button>';
+        for(var p=groupStart; p<=groupEnd; p++){
+          html += '<button class="pagebtn'+(p===dividendPage?' active':'')+'" data-div-page="'+p+'" type="button">'+p+'</button>';
+        }
+        if(groupEnd < totalPages) html += '<button class="pagebtn pagegroup" data-div-goto="'+(groupEnd+1)+'" type="button">다음 ›</button>';
+        html += '</div>';
+      }
+
+      html += '<div style="height:1px;background:var(--line);margin:20px 0 16px;"></div>';
+
+      var years = Array.from(new Set(list.map(function(d){ return d.date ? d.date.slice(0,4) : null; }).filter(Boolean))).sort(function(a,b){ return b-a; });
+      html += '<p class="card-title no-divider">📊 배당 통계</p>';
+      html += '<div class="chiprow" id="dividendYearChips" style="margin-bottom:12px;">';
+      html += '<button class="chip'+(dividendStatsYear==='all'?' selected':'')+'" data-year="all" type="button">전체</button>';
+      years.forEach(function(y){
+        html += '<button class="chip'+(dividendStatsYear===y?' selected':'')+'" data-year="'+y+'" type="button">'+y+'년</button>';
+      });
+      html += '</div>';
+
+      var stats = computeDividendStats(list, dividendStatsYear);
+      if(stats.rows.length === 0){
+        html += '<p class="empty-inline">이 기간엔 배당 기록이 없어요.</p>';
+      }else{
+        html += '<div class="rule-card">';
+        html += '<p style="font-size:13px;color:var(--ink-faint);margin-bottom:10px;">총 배당액 <b style="color:var(--ink);">'+formatWon(stats.total)+'원</b> · '+stats.count+'건</p>';
+        var maxAmt = stats.rows[0].amount;
+        stats.rows.forEach(function(r){
+          var pct = maxAmt > 0 ? Math.round(r.amount / maxAmt * 100) : 0;
+          html += '<div style="margin-bottom:10px;">';
+          html += '<div style="display:flex;justify-content:space-between;font-size:13px;"><span>'+escapeHtml(r.ticker)+'</span><b>'+formatWon(r.amount)+'원</b></div>';
+          html += '<div style="height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:4px;"><div style="height:100%;width:'+pct+'%;background:var(--pine);border-radius:4px;"></div></div>';
+          html += '</div>';
+        });
+        html += '</div>';
+
+        html += '<div style="display:flex;gap:10px;margin-top:10px;">';
+        if(stats.highest){
+          html += '<div class="rule-card" style="flex:1;text-align:center;"><p style="font-size:11px;color:var(--ink-faint);">🏆 최고 배당</p><p style="font-weight:700;margin-top:4px;">'+escapeHtml(stats.highest.ticker)+'</p><p style="font-size:13px;color:var(--pine);">'+formatWon(stats.highest.amount)+'원</p></div>';
+        }
+        if(stats.lowest && stats.lowest.ticker !== (stats.highest&&stats.highest.ticker)){
+          html += '<div class="rule-card" style="flex:1;text-align:center;"><p style="font-size:11px;color:var(--ink-faint);">🔻 최저 배당</p><p style="font-weight:700;margin-top:4px;">'+escapeHtml(stats.lowest.ticker)+'</p><p style="font-size:13px;color:var(--ink-soft);">'+formatWon(stats.lowest.amount)+'원</p></div>';
+        }
+        html += '</div>';
+      }
+    }
+
+    body.innerHTML = html;
+
+    var addBtn = document.getElementById('addDividendBtn');
+    if(addBtn) addBtn.addEventListener('click', function(){ openDividendForm(null); });
+
+    body.querySelectorAll('[data-dividend-row]').forEach(function(row){
+      row.addEventListener('click', function(){
+        var d = list.find(function(x){ return x.id === row.getAttribute('data-dividend-row'); });
+        if(d) openDividendForm(d);
+      });
+    });
+    body.querySelectorAll('[data-div-page]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        dividendPage = parseInt(btn.getAttribute('data-div-page'), 10);
+        renderDividendScreen();
+      });
+    });
+    body.querySelectorAll('[data-div-goto]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        dividendPage = parseInt(btn.getAttribute('data-div-goto'), 10);
+        renderDividendScreen();
+      });
+    });
+    var yearChips = document.getElementById('dividendYearChips');
+    if(yearChips){
+      yearChips.querySelectorAll('.chip').forEach(function(c){
+        c.addEventListener('click', function(){
+          dividendStatsYear = c.getAttribute('data-year');
+          renderDividendScreen();
+        });
+      });
+    }
+  }
+
+  function openDividendForm(existing){
+    editingDividendId = existing ? existing.id : null;
+    document.getElementById('dividendFormTitle').textContent = existing ? '💰 배당금 수정' : '💰 배당금 등록';
+
+    var sel = document.getElementById('dividendTickerSelect');
+    var known = getKnownTickers();
+    var selHtml = '';
+    if(known.length === 0){
+      selHtml = '<option value="">등록된 종목이 없어요</option>';
+    }else{
+      known.forEach(function(t){
+        selHtml += '<option value="'+escapeHtml(t)+'"'+(existing && existing.ticker===t ? ' selected':'')+'>'+escapeHtml(t)+'</option>';
+      });
+    }
+    sel.innerHTML = selHtml;
+
+    document.getElementById('dividendDateInput').value = existing ? existing.date : todayStr();
+    document.getElementById('dividendAmountInput').value = existing ? (existing.amount||'') : '';
+    document.getElementById('dividendMemoInput').value = existing ? (existing.memo||'') : '';
+    document.getElementById('dividendFormDeleteBtn').style.display = existing ? 'block' : 'none';
+
+    document.getElementById('dividendFormBackdrop').classList.add('open');
+    document.getElementById('dividendFormSheet').classList.add('open');
+  }
+
+  function closeDividendForm(){
+    document.getElementById('dividendFormBackdrop').classList.remove('open');
+    document.getElementById('dividendFormSheet').classList.remove('open');
+  }
+
+  async function saveDividendForm(){
+    var ticker = document.getElementById('dividendTickerSelect').value;
+    var date = document.getElementById('dividendDateInput').value;
+    var amount = parseFloat(document.getElementById('dividendAmountInput').value);
+    var memo = document.getElementById('dividendMemoInput').value.trim();
+
+    if(!ticker){ alert('종목을 선택해주세요.'); return; }
+    if(!date){ alert('배당일을 선택해주세요.'); return; }
+    if(isNaN(amount) || amount <= 0){ alert('배당금액을 정확히 입력해주세요.'); return; }
+
+    if(editingDividendId){
+      var idx = entries.findIndex(function(e){ return e.id === editingDividendId; });
+      if(idx > -1){
+        entries[idx] = Object.assign({}, entries[idx], { ticker:ticker, date:date, amount:amount, memo:memo, updatedAt:new Date().toISOString() });
+      }
+    }else{
+      entries.push({
+        id: 'd'+Date.now(), type:'dividend', ticker:ticker, date:date, amount:amount, memo:memo,
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+      });
+    }
+    await saveEntries();
+    closeDividendForm();
+    renderDividendScreen();
+  }
+
+  async function deleteDividendRecord(){
+    if(!editingDividendId) return;
+    if(!confirm('이 배당 기록을 삭제할까요?')) return;
+    entries = entries.filter(function(e){ return e.id !== editingDividendId; });
+    await saveEntries();
+    closeDividendForm();
+    renderDividendScreen();
+  }
+
   function renderAssetScreen(){
     var holdings = computeHoldings();
     var heroHoldings = filterHoldingsByAccount(holdings, holdingsFilterAccount);
@@ -6964,7 +7218,7 @@ window.addEventListener('error', function(ev){
   }
 
   function entriesForDate(dateStr){
-    return entries.filter(function(e){ return e.date === dateStr; });
+    return entries.filter(function(e){ return e.date === dateStr && e.type !== 'dividend'; });
   }
 
   function calcStreak(){
@@ -8521,6 +8775,33 @@ window.addEventListener('error', function(ev){
     document.getElementById('assetBackBtn').addEventListener('click', function(){
       document.getElementById('assetScreen').classList.remove('open');
     });
+    document.getElementById('assetSettingsBtn').addEventListener('click', function(){
+      document.getElementById('assetSettingsBackdrop').classList.add('open');
+      document.getElementById('assetSettingsSheet').classList.add('open');
+    });
+    document.getElementById('assetSettingsCloseBtn').addEventListener('click', function(){
+      document.getElementById('assetSettingsBackdrop').classList.remove('open');
+      document.getElementById('assetSettingsSheet').classList.remove('open');
+    });
+    document.getElementById('assetSettingsBackdrop').addEventListener('click', function(){
+      document.getElementById('assetSettingsBackdrop').classList.remove('open');
+      document.getElementById('assetSettingsSheet').classList.remove('open');
+    });
+    document.getElementById('goToDividendBtn').addEventListener('click', function(){
+      document.getElementById('assetSettingsBackdrop').classList.remove('open');
+      document.getElementById('assetSettingsSheet').classList.remove('open');
+      dividendPage = 1;
+      renderDividendScreen();
+      document.getElementById('dividendScreen').classList.add('open');
+    });
+    document.getElementById('dividendBackBtn').addEventListener('click', function(){
+      document.getElementById('dividendScreen').classList.remove('open');
+    });
+    document.getElementById('dividendFormCloseBtn').addEventListener('click', closeDividendForm);
+    document.getElementById('dividendFormCancelBtn').addEventListener('click', closeDividendForm);
+    document.getElementById('dividendFormBackdrop').addEventListener('click', closeDividendForm);
+    document.getElementById('dividendFormSaveBtn').addEventListener('click', saveDividendForm);
+    document.getElementById('dividendFormDeleteBtn').addEventListener('click', deleteDividendRecord);
     document.getElementById('investJudgmentBtn').addEventListener('click', function(){
       document.getElementById('investJudgmentScreen').classList.add('open');
       switchJudgmentTab(judgmentActiveTab);
