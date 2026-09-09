@@ -2007,6 +2007,16 @@
   <button class="danger" id="dividendFormDeleteBtn" type="button" style="width:100%;margin-top:10px;display:none;">이 배당기록 삭제</button>
 </div>
 
+<div class="settings-backdrop" id="stageIconSettingsBackdrop" style="z-index:960;"></div>
+<div class="settings-sheet" id="stageIconSettingsSheet" style="z-index:961;">
+  <div class="settings-header">
+    <span class="settings-title">🎭 단계별 캐릭터 설정</span>
+    <button class="settings-close" id="stageIconSettingsCloseBtn" type="button" aria-label="닫기">✕</button>
+  </div>
+  <p class="savehint" style="margin-bottom:12px;">"위험 신호 진행 단계"에서 오늘 상태(지금 여기)를 표시할 때 쓸 캐릭터예요. 이모지를 입력하거나, 사진을 올릴 수 있어요.</p>
+  <div id="stageIconSettingsBody"></div>
+</div>
+
 <div class="asset-screen" id="investJudgmentScreen">
   <div class="asset-header">
     <button class="asset-back" id="investJudgmentBackBtn" type="button">‹ 뒤로</button>
@@ -2765,6 +2775,14 @@ window.addEventListener('error', function(ev){
   }
   async function saveTickerRegistry(){
     settingsCache.tickerRegistry = tickerRegistry;
+    await persistSettingsBlob();
+  }
+  async function loadStageIconSettings(){
+    await ensureSettingsCacheLoaded();
+    return settingsCache.stageIconSettings || {};
+  }
+  async function saveStageIconSettings(){
+    settingsCache.stageIconSettings = stageIconSettings;
     await persistSettingsBlob();
   }
   function getTickerCategory(ticker){
@@ -5022,6 +5040,24 @@ window.addEventListener('error', function(ev){
    * ============================================================ */
 
   var CURRENT_STAGE_ICON = 'data:image/png;base64,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';
+
+  // 위험 신호 진행 단계마다 "지금 여기" 위치에 표시할 캐릭터/이모지를
+  // 사용자가 직접 설정할 수 있게 해요. 아직 아무것도 설정 안 했으면
+  // 기본 이모지를 써요.
+  var DEFAULT_STAGE_ICON_EMOJI = {
+    OVERHEAT: '🔥', VOL_EXP: '⚠️', WATCH: '🟠', EXPANSION: '🔴', PANIC: '🚨', RECOVERY: '🟡'
+  };
+  var stageIconSettings = {}; // { OVERHEAT: {type:'emoji', value:'🔥'} | {type:'image', value:'data:...'} , ... }
+
+  // 특정 단계에 표시할 아이콘의 HTML(이미지 또는 이모지)을 반환해요.
+  function renderStageIconHTML(stageKey, size){
+    var setting = stageIconSettings[stageKey];
+    if(setting && setting.type === 'image' && setting.value){
+      return '<img src="'+setting.value+'" style="width:'+size+'px;height:'+size+'px;object-fit:cover;border-radius:50%;display:block;">';
+    }
+    var emoji = (setting && setting.type === 'emoji' && setting.value) ? setting.value : (DEFAULT_STAGE_ICON_EMOJI[stageKey] || '⚪');
+    return '<div style="width:'+size+'px;height:'+size+'px;border-radius:50%;background:var(--paper-raised);display:flex;align-items:center;justify-content:center;font-size:'+Math.round(size*0.6)+'px;">'+emoji+'</div>';
+  }
   var RISK_STAGE_META = {
     OVERHEAT:  { emoji:'🔥', label:'과열 경고 시작', color:'#c97a3d' },
     VOL_EXP:   { emoji:'⚠️', label:'변동성 확대',   color:'var(--olive)' },
@@ -5320,7 +5356,10 @@ window.addEventListener('error', function(ev){
 
     var stageSeq = mkrBackfillRunning ? { available:false } : computeRiskStageSequence(mkrHistory);
 
-    html += '<p class="field-label field-label-strong" style="margin-top:18px;">🧭 위험 신호 진행 단계</p>';
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:18px;">';
+    html += '<p class="field-label field-label-strong" style="margin:0;">🧭 위험 신호 진행 단계</p>';
+    html += '<button class="cancelbtn" id="stageIconSettingsOpenBtn" type="button" style="font-size:11.5px;padding:5px 10px;">🎭 캐릭터 설정</button>';
+    html += '</div>';
 
     if(!stageSeq.available){
       html += '<p class="savehint">이 기능을 쓰려면 최소 253거래일(대략 1년)치 데이터가 필요해요. 아래 "과거 시장 데이터 보강"으로 채울 수 있어요.</p>';
@@ -5343,7 +5382,7 @@ window.addEventListener('error', function(ev){
         html += '</div>';
         if(isCurrent){
           html += '<div style="text-align:center;flex-shrink:0;margin-left:8px;">';
-          html += '<img src="'+CURRENT_STAGE_ICON+'" style="width:36px;height:36px;border-radius:50%;border:2px solid '+s.meta.color+';display:block;">';
+          html += '<div style="border-radius:50%;border:2px solid '+s.meta.color+';display:inline-block;overflow:hidden;">'+renderStageIconHTML(s.stage, 36)+'</div>';
           html += '<p style="font-size:9.5px;color:'+s.meta.color+';font-weight:700;margin-top:2px;">지금 여기</p>';
           html += '</div>';
         }
@@ -5548,6 +5587,15 @@ window.addEventListener('error', function(ev){
     var backfillBtn = document.getElementById('mkrBackfillBtn');
     if(backfillBtn && !mkrBackfillRunning){
       backfillBtn.addEventListener('click', backfillMkrHistory);
+    }
+
+    var stageIconSettingsOpenBtn = document.getElementById('stageIconSettingsOpenBtn');
+    if(stageIconSettingsOpenBtn){
+      stageIconSettingsOpenBtn.addEventListener('click', function(){
+        renderStageIconSettingsSheet();
+        document.getElementById('stageIconSettingsBackdrop').classList.add('open');
+        document.getElementById('stageIconSettingsSheet').classList.add('open');
+      });
     }
   }
 
@@ -6242,6 +6290,88 @@ window.addEventListener('error', function(ev){
     return holdings;
   }
 
+  // 사진을 base64로 바꾸면서 너무 크지 않게 줄여요(가로/세로 최대 maxSize).
+  function resizeImageFile(file, maxSize, callback){
+    var reader = new FileReader();
+    reader.onload = function(e){
+      var img = new Image();
+      img.onload = function(){
+        var canvas = document.createElement('canvas');
+        var w = img.width, h = img.height;
+        var scale = Math.min(1, maxSize / Math.max(w, h));
+        canvas.width = Math.max(1, Math.round(w * scale));
+        canvas.height = Math.max(1, Math.round(h * scale));
+        var ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        callback(canvas.toDataURL('image/jpeg', 0.85));
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function renderStageIconSettingsSheet(){
+    var body = document.getElementById('stageIconSettingsBody');
+    if(!body) return;
+    var order = ['OVERHEAT','VOL_EXP','WATCH','EXPANSION','PANIC','RECOVERY'];
+    var html = '';
+    order.forEach(function(key){
+      var meta = RISK_STAGE_META[key];
+      html += '<div class="rule-card" style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">';
+      html += '<div style="flex-shrink:0;">'+renderStageIconHTML(key, 40)+'</div>';
+      html += '<div style="flex:1;">';
+      html += '<p style="font-weight:700;font-size:13px;">'+meta.emoji+' '+meta.label+'</p>';
+      html += '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">';
+      html += '<input type="text" class="stageEmojiInput" data-stage="'+key+'" placeholder="이모지" maxlength="4" style="width:64px;text-align:center;padding:6px;">';
+      html += '<label class="cancelbtn" style="font-size:11.5px;padding:6px 10px;cursor:pointer;margin:0;">사진 선택<input type="file" accept="image/*" class="stageImageInput" data-stage="'+key+'" style="display:none;"></label>';
+      html += '<button class="cancelbtn" data-stage-reset="'+key+'" type="button" style="font-size:11.5px;padding:6px 10px;">기본값</button>';
+      html += '</div>';
+      html += '</div>';
+      html += '</div>';
+    });
+    body.innerHTML = html;
+
+    order.forEach(function(key){
+      var setting = stageIconSettings[key];
+      var inp = body.querySelector('.stageEmojiInput[data-stage="'+key+'"]');
+      if(inp && setting && setting.type === 'emoji') inp.value = setting.value;
+    });
+
+    body.querySelectorAll('.stageEmojiInput').forEach(function(inp){
+      inp.addEventListener('change', async function(){
+        var key = inp.getAttribute('data-stage');
+        var val = inp.value.trim();
+        if(val){
+          stageIconSettings[key] = { type:'emoji', value: val };
+          await saveStageIconSettings();
+          renderStageIconSettingsSheet();
+        }
+      });
+    });
+
+    body.querySelectorAll('.stageImageInput').forEach(function(inp){
+      inp.addEventListener('change', function(){
+        var key = inp.getAttribute('data-stage');
+        var file = inp.files && inp.files[0];
+        if(!file) return;
+        resizeImageFile(file, 96, async function(dataUrl){
+          stageIconSettings[key] = { type:'image', value: dataUrl };
+          await saveStageIconSettings();
+          renderStageIconSettingsSheet();
+        });
+      });
+    });
+
+    body.querySelectorAll('[data-stage-reset]').forEach(function(btn){
+      btn.addEventListener('click', async function(){
+        var key = btn.getAttribute('data-stage-reset');
+        delete stageIconSettings[key];
+        await saveStageIconSettings();
+        renderStageIconSettingsSheet();
+      });
+    });
+  }
+
   function renderDividendScreen(){
     var body = document.getElementById('dividendBody');
     if(!body) return;
@@ -6382,7 +6512,13 @@ window.addEventListener('error', function(ev){
     document.getElementById('dividendFormSheet').classList.remove('open');
   }
 
+  var dividendSaveInProgress = false;
   async function saveDividendForm(){
+    if(dividendSaveInProgress) return;
+
+    var sheet = document.getElementById('dividendFormSheet');
+    if(!sheet || !sheet.classList.contains('open')) return;
+
     var ticker = document.getElementById('dividendTickerSelect').value;
     var date = document.getElementById('dividendDateInput').value;
     var amount = parseFloat(document.getElementById('dividendAmountInput').value);
@@ -6392,20 +6528,29 @@ window.addEventListener('error', function(ev){
     if(!date){ alert('배당일을 선택해주세요.'); return; }
     if(isNaN(amount) || amount <= 0){ alert('배당금액을 정확히 입력해주세요.'); return; }
 
-    if(editingDividendId){
-      var idx = entries.findIndex(function(e){ return e.id === editingDividendId; });
-      if(idx > -1){
-        entries[idx] = Object.assign({}, entries[idx], { ticker:ticker, date:date, amount:amount, memo:memo, updatedAt:new Date().toISOString() });
+    dividendSaveInProgress = true;
+    var saveBtn = document.getElementById('dividendFormSaveBtn');
+    if(saveBtn) saveBtn.disabled = true;
+
+    try{
+      if(editingDividendId){
+        var idx = entries.findIndex(function(e){ return e.id === editingDividendId; });
+        if(idx > -1){
+          entries[idx] = Object.assign({}, entries[idx], { ticker:ticker, date:date, amount:amount, memo:memo, updatedAt:new Date().toISOString() });
+        }
+      }else{
+        entries.push({
+          id: 'd'+Date.now(), type:'dividend', ticker:ticker, date:date, amount:amount, memo:memo,
+          createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+        });
       }
-    }else{
-      entries.push({
-        id: 'd'+Date.now(), type:'dividend', ticker:ticker, date:date, amount:amount, memo:memo,
-        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
-      });
+      await saveEntries();
+      closeDividendForm();
+      renderDividendScreen();
+    }finally{
+      dividendSaveInProgress = false;
+      if(saveBtn) saveBtn.disabled = false;
     }
-    await saveEntries();
-    closeDividendForm();
-    renderDividendScreen();
   }
 
   async function deleteDividendRecord(){
@@ -7045,8 +7190,9 @@ window.addEventListener('error', function(ev){
   }
   function entriesInPeriod(mode){
     var range = getPeriodRange(mode);
-    if(!range) return entries.slice();
-    return entries.filter(function(e){ return e.date >= range.start && e.date <= range.end; });
+    var base = entries.filter(function(e){ return e.type !== 'dividend'; });
+    if(!range) return base;
+    return base.filter(function(e){ return e.date >= range.start && e.date <= range.end; });
   }
 
   function baseFilteredEntries(){
@@ -8838,6 +8984,14 @@ window.addEventListener('error', function(ev){
     document.getElementById('dividendFormBackdrop').addEventListener('click', closeDividendForm);
     document.getElementById('dividendFormSaveBtn').addEventListener('click', saveDividendForm);
     document.getElementById('dividendFormDeleteBtn').addEventListener('click', deleteDividendRecord);
+    document.getElementById('stageIconSettingsCloseBtn').addEventListener('click', function(){
+      document.getElementById('stageIconSettingsBackdrop').classList.remove('open');
+      document.getElementById('stageIconSettingsSheet').classList.remove('open');
+    });
+    document.getElementById('stageIconSettingsBackdrop').addEventListener('click', function(){
+      document.getElementById('stageIconSettingsBackdrop').classList.remove('open');
+      document.getElementById('stageIconSettingsSheet').classList.remove('open');
+    });
     document.getElementById('investJudgmentBtn').addEventListener('click', function(){
       document.getElementById('investJudgmentScreen').classList.add('open');
       switchJudgmentTab(judgmentActiveTab);
@@ -8916,6 +9070,7 @@ window.addEventListener('error', function(ev){
       entries = await loadEntries();
       otherAssets = await loadOtherAssets();
       tickerRegistry = await loadTickerRegistry();
+      stageIconSettings = await loadStageIconSettings();
       await migrateEntryAccounts();
       currentPrices = await loadCurrentPrices();
       previousPrices = await loadPreviousPrices();
