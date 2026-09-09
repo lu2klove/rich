@@ -3955,12 +3955,22 @@ window.addEventListener('error', function(ev){
       return 'PANIC_RECOVERY';
     }
 
-    /* 패닉 */
-    if(
+    var isPanicToday =
       volatilityExtreme &&
       severeDown &&
-      panicFactors >= 2
-    ){
+      panicFactors >= 2;
+
+    // 어제까지 패닉이었는데 오늘은 그 극단적인 조건에서 벗어난 첫날이에요.
+    // (예전엔 "20일 누적 수익률이 플러스로 전환"될 때까지 기다렸는데, 이건
+    //  실제 패닉이 진정되는 시점보다 한참 늦게 반응해서 "패닉회복" 단계
+    //  자체가 실전에서 거의 안 뜨는 문제가 있었어요. 패닉 조건을 벗어난
+    //  바로 다음날을 "회복이 시작되는 날"로 봐요.)
+    if(data.previousState === 'PANIC' && !isPanicToday){
+      return 'PANIC_RECOVERY';
+    }
+
+    /* 패닉 */
+    if(isPanicToday){
       return 'PANIC';
     }
 
@@ -5051,18 +5061,33 @@ window.addEventListener('error', function(ev){
       return { available:true, stages:[], ongoing:false };
     }
 
-    // 최근 신호가 없던 기간(3일 이내)은 같은 에피소드로 봐서 하루이틀의
-    // 짧은 소강 상태 때문에 흐름이 끊겨 보이지 않게 해요.
+    // 에피소드 시작점을 찾아요. 짧은 소강 상태(며칠간 신호가 잠깐 없는 것)는
+    // 같은 흐름으로 보되, "저강도 상태(NONE 또는 과열만 있는 상태)"가
+    // 10거래일 이상 이어지면 거기서 확실히 끊어요. 이렇게 안 하면, 예를 들어
+    // 3월에 있었던 위기와 그로부터 몇 달 뒤 완전히 별개로 터진 7월 위기가,
+    // 그 사이 시장이 계속 과열 상태였다는 이유만으로 하나의 흐름처럼
+    // 잘못 이어져 보이는 문제가 있었어요.
     var episodeEnd = i;
     var episodeStartIdx = i;
     var gap = 0;
+    var calmRun = 0;
     for(var j=i; j>=0; j--){
-      if(classified[j].stage === 'NONE'){
+      var stageAtJ = classified[j].stage;
+      var isLowIntensity = (stageAtJ === 'NONE' || stageAtJ === 'OVERHEAT');
+
+      if(stageAtJ === 'NONE'){
         gap++;
         if(gap > 3) break;
       }else{
         gap = 0;
         episodeStartIdx = j;
+      }
+
+      if(isLowIntensity){
+        calmRun++;
+        if(calmRun >= 10) break;
+      }else{
+        calmRun = 0;
       }
     }
 
