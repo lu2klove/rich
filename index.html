@@ -89,6 +89,9 @@
     scrollbar-width:none;
     -ms-overflow-style:none;
   }
+  body.entryform-overlay-active .app{
+    z-index:971;
+  }
   .app::-webkit-scrollbar{
     display:none;
     width:0;
@@ -1345,6 +1348,23 @@
     overflow:hidden;
     transition:max-height .35s ease;
   }
+  .entryform-wrap.overlay-mode{
+    position:fixed;
+    top:0; left:0; right:0; bottom:0;
+    max-height:100vh !important;
+    z-index:970;
+    background:var(--paper);
+    overflow-y:auto;
+    -webkit-overflow-scrolling:touch;
+    transition:none;
+    padding:16px 16px calc(24px + env(safe-area-inset-bottom));
+    box-sizing:border-box;
+  }
+  .entryform-wrap.overlay-mode .overlay-close-btn{
+    display:flex !important;
+    align-items:center;
+    justify-content:center;
+  }
   .day-detail-inner{
     padding-top:14px;
     margin-top:14px;
@@ -1840,7 +1860,10 @@
 
   <div class="entryform-wrap" id="entryFormWrap">
   <div class="card">
-    <p class="card-title no-divider" id="formTitle">오늘 기록</p>
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <p class="card-title no-divider" id="formTitle" style="margin:0;">오늘 기록</p>
+      <button class="cancelbtn overlay-close-btn" id="entryFormOverlayCloseBtn" type="button" style="display:none;width:32px;height:32px;padding:0;font-size:14px;flex-shrink:0;">✕</button>
+    </div>
 
     <div class="field">
       <span class="field-label field-label-strong">☀️ 오늘 뭘 했나요</span>
@@ -6813,10 +6836,8 @@ window.addEventListener('error', function(ev){
     document.querySelectorAll('.trade-record-row').forEach(function(row){
       row.addEventListener('click', function(){
         var id = row.getAttribute('data-edit-entry-id');
-        document.querySelectorAll('.asset-screen.open').forEach(function(scr){ scr.classList.remove('open'); });
         startEdit(id);
-        openEntryForm();
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        openEntryForm(true);
       });
     });
     document.querySelectorAll('.holding-rename-btn').forEach(function(btn){
@@ -8067,7 +8088,11 @@ window.addEventListener('error', function(ev){
       });
     });
     container.querySelectorAll('.editbtn').forEach(function(btn){
-      btn.addEventListener('click', function(){ startEdit(btn.getAttribute('data-id')); });
+      btn.addEventListener('click', function(){
+        var id = btn.getAttribute('data-id');
+        startEdit(id);
+        openEntryForm(true);
+      });
     });
     container.querySelectorAll('.delbtn').forEach(function(btn){
       btn.addEventListener('click', function(){
@@ -8256,11 +8281,19 @@ window.addEventListener('error', function(ev){
     document.getElementById('cancelEditBtn').style.display = 'none';
   }
 
-  function openEntryForm(){
-    document.getElementById('entryFormWrap').style.maxHeight = '2000px';
+  function openEntryForm(asOverlay){
+    var wrap = document.getElementById('entryFormWrap');
+    if(asOverlay){
+      wrap.classList.add('overlay-mode');
+      document.body.classList.add('entryform-overlay-active');
+    }
+    wrap.style.maxHeight = '2000px';
   }
   function closeEntryForm(){
-    document.getElementById('entryFormWrap').style.maxHeight = '0px';
+    var wrap = document.getElementById('entryFormWrap');
+    wrap.style.maxHeight = '0px';
+    wrap.classList.remove('overlay-mode');
+    document.body.classList.remove('entryform-overlay-active');
   }
 
   function startEdit(id){
@@ -8400,10 +8433,8 @@ window.addEventListener('error', function(ev){
     panel.querySelectorAll('.editbtn').forEach(function(btn){
       btn.addEventListener('click', function(){
         var id = btn.getAttribute('data-id');
-        selectedCalendarDate = null;
-        renderDayDetail();
-        renderStampGrid(false);
         startEdit(id);
+        openEntryForm(true);
       });
     });
     panel.querySelectorAll('.delbtn').forEach(function(btn){
@@ -8490,9 +8521,8 @@ window.addEventListener('error', function(ev){
     panel.querySelectorAll('.monthEditbtn').forEach(function(btn){
       btn.addEventListener('click', function(){
         var id = btn.getAttribute('data-id');
-        monthEntriesDetailOpen = false;
-        renderMonthEntriesDetail();
         startEdit(id);
+        openEntryForm(true);
       });
     });
     panel.querySelectorAll('.monthDelbtn').forEach(function(btn){
@@ -8735,6 +8765,10 @@ window.addEventListener('error', function(ev){
     });
     document.getElementById('saveBtn').addEventListener('click', handleSave);
     document.getElementById('cancelEditBtn').addEventListener('click', function(){
+      resetForm();
+      closeEntryForm();
+    });
+    document.getElementById('entryFormOverlayCloseBtn').addEventListener('click', function(){
       resetForm();
       closeEntryForm();
     });
