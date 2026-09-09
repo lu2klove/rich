@@ -5129,24 +5129,6 @@ window.addEventListener('error', function(ev){
       }
     });
 
-    // 오늘 상태가 "재진입"이라서(즉 정해진 심각도 순서상 뒤에 있는 다른
-    // 단계보다 날짜가 실제로 더 나중이라서) 목록 순서와 날짜 흐름이 어긋나
-    // 보이면, 그 항목만 맨 끝(가장 최근)으로 옮겨요. 재진입이 아닌 보통의
-    // 진행(과열→...→회복까지 순서대로)에서는 이 조건에 안 걸려서 원래
-    // 순서 그대로 유지돼요.
-    if(todayStage){
-      var todayIdx = stages.findIndex(function(s){ return s.stage === todayStage; });
-      if(todayIdx > -1 && todayIdx < stages.length - 1){
-        var isReentry = stages.some(function(s, idx){
-          return idx > todayIdx && s.date < stages[todayIdx].date;
-        });
-        if(isReentry){
-          var todayItem = stages.splice(todayIdx, 1)[0];
-          stages.push(todayItem);
-        }
-      }
-    }
-
     return {
       available: true,
       stages: stages,
