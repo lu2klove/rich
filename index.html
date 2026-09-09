@@ -6665,14 +6665,14 @@ window.addEventListener('error', function(ev){
         html += '<div class="holding-sub sltp-line">손절가(현재가 기준) <b style="color:var(--blue);">'+formatWon(stopLossFromCurrentAmt)+'원</b>'+(stopLossFromCurrentUnit!=null?'(단가 '+formatWon(stopLossFromCurrentUnit)+'원)':'')+'</div>';
         html += '<div class="holding-sub sltp-line">손절가(매입가 기준) <b style="color:var(--blue);">'+formatWon(stopLossFromAvgAmt)+'원</b>(단가 '+formatWon(stopLossFromAvgUnit)+'원)</div>';
         html += '<div class="holding-sub sltp-line">익절가 <b style="color:var(--brick);">'+formatWon(takeProfitAmt)+'원</b>'+(takeProfitUnit!=null?'(단가 '+formatWon(takeProfitUnit)+'원)':'')+'</div>';
-        var holdingSafeId = tickerToSafeId(h.ticker);
+        var holdingSafeId = tickerToSafeId(h.ticker + '||' + (h.account || ''));
         html += '<button class="holding-toggle-btn" data-toggle-id="'+holdingSafeId+'" type="button">펼쳐보기 ▾</button>';
         html += '<div class="holding-row2" id="holdingDetails_'+holdingSafeId+'" style="display:none;">';
         html += '<div class="symbol-row">';
         html += '<input type="text" class="symbolInput2" data-ticker="'+escapeHtml(h.ticker)+'" placeholder="종목코드, 종목명(국내), 또는 AAPL 등" value="'+escapeHtml(getTickerSymbol(h.ticker))+'">';
         html += '<button class="fetchbtn" data-ticker="'+escapeHtml(h.ticker)+'" type="button">🔄 조회</button>';
         html += '</div>';
-        html += '<p class="fetch-status" id="fetchStatus_'+tickerToSafeId(h.ticker)+'"></p>';
+        html += '<p class="fetch-status" id="fetchStatus_'+holdingSafeId+'"></p>';
         html += '<input type="text" inputmode="numeric" class="priceInput2" data-ticker="'+escapeHtml(h.ticker)+'" placeholder="현재가 입력" value="'+(h.currentPrice!=null?h.currentPrice:'')+'">';
         html += '<div class="chiprow cat-chiprow" data-ticker="'+escapeHtml(h.ticker)+'">';
         ['domestic','overseas','crypto'].forEach(function(catKey){
@@ -6693,6 +6693,28 @@ window.addEventListener('error', function(ev){
           html += '<option value="'+escapeHtml(acc.name)+'"'+sel+'>'+escapeHtml(acc.name)+'</option>';
         });
         html += '</select>';
+
+        var relatedTrades = entries.filter(function(e){
+          if((e.type !== 'buy' && e.type !== 'sell') || e.ticker !== h.ticker) return false;
+          var eAcct = (e.account != null && e.account !== '') ? e.account : (getTickerAccount(h.ticker) || '');
+          return eAcct === (h.account || '');
+        }).slice().sort(function(a,b){ return a.date < b.date ? 1 : -1; });
+
+        html += '<p class="field-label field-label-strong" style="margin-top:14px;">📋 이 종목의 매매기록 ('+relatedTrades.length+'건)</p>';
+        if(relatedTrades.length === 0){
+          html += '<p class="savehint">연결된 매매기록이 없어요.</p>';
+        }else{
+          html += '<div class="rule-card" style="padding:4px 12px;">';
+          relatedTrades.forEach(function(e, idx){
+            html += '<div class="trade-record-row" data-edit-entry-id="'+e.id+'" style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;cursor:pointer;'+(idx<relatedTrades.length-1?'border-bottom:1px solid var(--line);':'')+'">';
+            html += '<div><span class="badge '+e.type+'" style="margin-right:6px;">'+(e.type==='buy'?'매수':'매도')+'</span><span style="font-size:12.5px;color:var(--ink-faint);">'+niceDate(e.date)+'</span></div>';
+            html += '<div style="text-align:right;font-size:12.5px;">'+(e.quantity?e.quantity+'주 · ':'')+(e.price?formatWon(e.price)+'원':'')+' <span style="color:var(--ink-faint);">✏️</span></div>';
+            html += '</div>';
+          });
+          html += '</div>';
+          html += '<p class="savehint">기록을 누르면 홈 화면의 수정 폼으로 바로 이동해요.</p>';
+        }
+
         html += '<div class="row2" style="margin-top:10px;">';
         html += '<button class="cancelbtn holding-rename-btn" data-ticker="'+escapeHtml(h.ticker)+'" type="button">✏️ 종목명 수정</button>';
         html += '<button class="danger holding-delete-btn" data-ticker="'+escapeHtml(h.ticker)+'" type="button">🗑️ 종목 삭제</button>';
@@ -6786,6 +6808,15 @@ window.addEventListener('error', function(ev){
         var isOpen = panel.style.display !== 'none';
         panel.style.display = isOpen ? 'none' : 'block';
         btn.textContent = isOpen ? '펼쳐보기 ▾' : '접기 ▴';
+      });
+    });
+    document.querySelectorAll('.trade-record-row').forEach(function(row){
+      row.addEventListener('click', function(){
+        var id = row.getAttribute('data-edit-entry-id');
+        document.querySelectorAll('.asset-screen.open').forEach(function(scr){ scr.classList.remove('open'); });
+        startEdit(id);
+        openEntryForm();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       });
     });
     document.querySelectorAll('.holding-rename-btn').forEach(function(btn){
@@ -6884,7 +6915,10 @@ window.addEventListener('error', function(ev){
     document.querySelectorAll('.fetchbtn').forEach(function(btn){
       btn.addEventListener('click', async function(){
         var ticker = btn.getAttribute('data-ticker');
-        var safeId = tickerToSafeId(ticker);
+        var holdingRow = btn.closest('.holding-row2');
+        var acctSel = holdingRow ? holdingRow.querySelector('.accountSelect2') : null;
+        var acctForId = acctSel ? acctSel.getAttribute('data-account') : '';
+        var safeId = tickerToSafeId(ticker + '||' + (acctForId || ''));
         var statusEl = document.getElementById('fetchStatus_'+safeId);
         var symbolInp = btn.closest('.symbol-row').querySelector('.symbolInput2');
         var symbol = symbolInp ? symbolInp.value.trim() : '';
