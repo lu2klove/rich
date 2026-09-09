@@ -5037,8 +5037,8 @@ window.addEventListener('error', function(ev){
     if(state === 'PANIC_RECOVERY') return 'RECOVERY';
     if(state === 'PANIC') return 'PANIC';
     if(state === 'RISK_EXPANSION' || tierLabel === '고위험' || tierLabel === '극단적 위험') return 'EXPANSION';
-    if(tierLabel === '경계' || state === 'RISK_WATCH') return 'WATCH';
     if(state === 'VOL_EXPANSION' || state === 'HIGH_VOL_UP') return 'VOL_EXP';
+    if(tierLabel === '경계' || state === 'RISK_WATCH') return 'WATCH';
     if(d.overheat.score >= 50) return 'OVERHEAT';
     return 'NONE';
   }
@@ -5093,30 +5093,59 @@ window.addEventListener('error', function(ev){
 
     var episode = classified.slice(episodeStartIdx, episodeEnd + 1);
 
-    // 각 단계가 이 에피소드 안에서 "처음 나타난 날짜"만 기록해요.
+    // 각 단계가 이 에피소드 안에서 "처음 나타난 날짜"를 기록해요(순서 정렬용).
     // (실제 시장은 들쭉날쭉할 수 있어서, 예를 들어 위험경계 중간에 하루이틀
     //  짧은 패닉성 스파이크가 먼저 찍히고 나서 본격적인 위험확대가 나타나는
     //  경우가 있는데, 이런 노이즈 때문에 "시간순 최초발생" 순서를 그대로 쓰면
     //  단계 순서가 뒤죽박죽으로 보일 수 있어요. 그래서 날짜는 각자 기록해두되,
     //  최종 나열 순서는 항상 정해진 심각도 순서를 따르게 해요.)
+    //
+    // 동시에 "가장 최근 발생일"도 따로 기록해요. 같은 흐름 안에서 위험경계 →
+    // 위험확대 → 패닉 → 회복을 거친 뒤, 다시 위험경계로 재진입하는 경우가
+    // 있는데, 이때 "오늘의 상태"에 해당하는 단계는 맨 처음 날짜가 아니라
+    // 가장 최근에 그 단계로 들어온 날짜를 보여줘야, "지금 여기" 표시와
+    // 날짜가 서로 어긋나지 않아요.
     var firstSeenDate = {};
+    var lastSeenDate = {};
     episode.forEach(function(c){
-      if(c.stage !== 'NONE' && !firstSeenDate[c.stage]){
-        firstSeenDate[c.stage] = c.date;
+      if(c.stage !== 'NONE'){
+        if(!firstSeenDate[c.stage]) firstSeenDate[c.stage] = c.date;
+        lastSeenDate[c.stage] = c.date;
       }
     });
+
+    var todayStage = classified[n-1].stage !== 'NONE' ? classified[n-1].stage : null;
 
     var CANONICAL_ORDER = ['OVERHEAT','VOL_EXP','WATCH','EXPANSION','PANIC','RECOVERY'];
     var stages = [];
     CANONICAL_ORDER.forEach(function(stageKey){
       if(firstSeenDate[stageKey]){
+        var displayDate = (stageKey === todayStage) ? lastSeenDate[stageKey] : firstSeenDate[stageKey];
         stages.push({
           stage: stageKey,
-          date: firstSeenDate[stageKey],
+          date: displayDate,
           meta: RISK_STAGE_META[stageKey]
         });
       }
     });
+
+    // 오늘 상태가 "재진입"이라서(즉 정해진 심각도 순서상 뒤에 있는 다른
+    // 단계보다 날짜가 실제로 더 나중이라서) 목록 순서와 날짜 흐름이 어긋나
+    // 보이면, 그 항목만 맨 끝(가장 최근)으로 옮겨요. 재진입이 아닌 보통의
+    // 진행(과열→...→회복까지 순서대로)에서는 이 조건에 안 걸려서 원래
+    // 순서 그대로 유지돼요.
+    if(todayStage){
+      var todayIdx = stages.findIndex(function(s){ return s.stage === todayStage; });
+      if(todayIdx > -1 && todayIdx < stages.length - 1){
+        var isReentry = stages.some(function(s, idx){
+          return idx > todayIdx && s.date < stages[todayIdx].date;
+        });
+        if(isReentry){
+          var todayItem = stages.splice(todayIdx, 1)[0];
+          stages.push(todayItem);
+        }
+      }
+    }
 
     return {
       available: true,
