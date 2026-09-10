@@ -1998,7 +1998,29 @@
     <span class="settings-title">⚙️ 자산관리 설정</span>
     <button class="settings-close" id="assetSettingsCloseBtn" type="button" aria-label="닫기">✕</button>
   </div>
-  <button class="cancelbtn" id="goToDividendBtn" type="button" style="width:100%;text-align:left;">💰 배당관리 ›</button>
+  <button class="cancelbtn" id="goToDividendBtn" type="button" style="width:100%;text-align:left;margin-bottom:8px;">💰 배당관리 ›</button>
+  <button class="cancelbtn" id="goToHeatmapSettingsBtn" type="button" style="width:100%;text-align:left;">🗺️ 히트맵 설정 ›</button>
+</div>
+
+<div class="settings-backdrop" id="heatmapSettingsBackdrop" style="z-index:960;"></div>
+<div class="settings-sheet" id="heatmapSettingsSheet" style="z-index:961;">
+  <div class="settings-header">
+    <span class="settings-title">🗺️ 히트맵 설정</span>
+    <button class="settings-close" id="heatmapSettingsCloseBtn" type="button" aria-label="닫기">✕</button>
+  </div>
+  <p class="savehint" style="margin-bottom:12px;">자산 히트맵을 자동으로 갱신할지, 아니면 "최신 시세 조회"를 눌렀을 때만 갱신할지 정해요.</p>
+  <label style="display:flex;align-items:center;gap:8px;margin-bottom:14px;cursor:pointer;">
+    <input type="checkbox" id="heatmapManualToggle" style="width:18px;height:18px;">
+    <span>수동 갱신 (자동 갱신 끄기)</span>
+  </label>
+  <div id="heatmapIntervalOptions">
+    <span class="field-label field-label-strong">자동 갱신 주기</span>
+    <div class="chiprow" id="heatmapIntervalChips" style="margin-top:8px;">
+      <button class="chip" data-interval="30" type="button">30초</button>
+      <button class="chip" data-interval="60" type="button">1분</button>
+      <button class="chip" data-interval="180" type="button">3분</button>
+    </div>
+  </div>
 </div>
 
 <div class="settings-backdrop" id="dividendFormBackdrop" style="z-index:960;"></div>
@@ -2808,6 +2830,14 @@ window.addEventListener('error', function(ev){
     settingsCache.stageIconSettings = stageIconSettings;
     await persistSettingsBlob();
   }
+  async function loadHeatmapRefreshSettings(){
+    await ensureSettingsCacheLoaded();
+    return settingsCache.heatmapRefreshSettings || { mode:'manual', intervalSec:60 };
+  }
+  async function saveHeatmapRefreshSettings(){
+    settingsCache.heatmapRefreshSettings = heatmapRefreshSettings;
+    await persistSettingsBlob();
+  }
   function getTickerCategory(ticker){
     var found = tickerRegistry.find(function(t){ return t.ticker === ticker; });
     return found ? found.category : 'domestic';
@@ -3066,6 +3096,8 @@ window.addEventListener('error', function(ev){
   }
 
   var heatmapFilterAccount = '';
+  var heatmapRefreshSettings = { mode:'manual', intervalSec:60 };
+  var heatmapRefreshTimer = null;
 
   // 정사각형에 가까운 타일로 배치하는 표준 트리맵 알고리즘(squarified treemap).
   // items: [{value:number, ...}] -> 반환: 각 항목에 {x,y,w,h}가 추가된 배열
@@ -5405,7 +5437,7 @@ window.addEventListener('error', function(ev){
         html += '</div>';
         if(isCurrent){
           html += '<div style="text-align:center;flex-shrink:0;margin-left:8px;">';
-          html += '<div style="border-radius:50%;border:2px solid '+s.meta.color+';display:inline-block;overflow:hidden;">'+renderStageIconHTML(s.stage, 36)+'</div>';
+          html += '<div style="border-radius:50%;border:2px solid '+s.meta.color+';display:inline-block;overflow:hidden;">'+renderStageIconHTML(s.stage, 44)+'</div>';
           html += '<p style="font-size:9.5px;color:'+s.meta.color+';font-weight:700;margin-top:2px;">지금 여기</p>';
           html += '</div>';
         }
@@ -6331,6 +6363,39 @@ window.addEventListener('error', function(ev){
       img.src = e.target.result;
     };
     reader.readAsDataURL(file);
+  }
+
+  function renderHeatmapSettingsSheet(){
+    var manualToggle = document.getElementById('heatmapManualToggle');
+    var isManual = heatmapRefreshSettings.mode === 'manual';
+    manualToggle.checked = isManual;
+    var optionsWrap = document.getElementById('heatmapIntervalOptions');
+    optionsWrap.style.opacity = isManual ? '0.4' : '1';
+    document.querySelectorAll('#heatmapIntervalChips .chip').forEach(function(c){
+      var val = parseInt(c.getAttribute('data-interval'), 10);
+      c.classList.toggle('selected', !isManual && val === heatmapRefreshSettings.intervalSec);
+    });
+  }
+
+  function stopHeatmapAutoRefresh(){
+    if(heatmapRefreshTimer){
+      clearInterval(heatmapRefreshTimer);
+      heatmapRefreshTimer = null;
+    }
+  }
+
+  function startHeatmapAutoRefreshIfNeeded(){
+    stopHeatmapAutoRefresh();
+    if(heatmapRefreshSettings.mode !== 'manual' && document.getElementById('assetScreen').classList.contains('open')){
+      heatmapRefreshTimer = setInterval(function(){
+        // 화면이 다른 곳으로 넘어갔으면(자산관리를 벗어났으면) 스스로 멈춰요.
+        if(!document.getElementById('assetScreen').classList.contains('open')){
+          stopHeatmapAutoRefresh();
+          return;
+        }
+        refreshAllHoldingPrices();
+      }, heatmapRefreshSettings.intervalSec * 1000);
+    }
   }
 
   function renderStageIconSettingsSheet(){
@@ -9021,9 +9086,11 @@ window.addEventListener('error', function(ev){
       holdingsFilterAccount = '';
       renderAssetScreen();
       document.getElementById('assetScreen').classList.add('open');
+      startHeatmapAutoRefreshIfNeeded();
     });
     document.getElementById('assetBackBtn').addEventListener('click', function(){
       document.getElementById('assetScreen').classList.remove('open');
+      stopHeatmapAutoRefresh();
     });
     document.getElementById('assetSettingsBtn').addEventListener('click', function(){
       document.getElementById('assetSettingsBackdrop').classList.add('open');
@@ -9043,6 +9110,38 @@ window.addEventListener('error', function(ev){
       dividendPage = 1;
       renderDividendScreen();
       document.getElementById('dividendScreen').classList.add('open');
+    });
+    document.getElementById('goToHeatmapSettingsBtn').addEventListener('click', function(){
+      document.getElementById('assetSettingsBackdrop').classList.remove('open');
+      document.getElementById('assetSettingsSheet').classList.remove('open');
+      renderHeatmapSettingsSheet();
+      document.getElementById('heatmapSettingsBackdrop').classList.add('open');
+      document.getElementById('heatmapSettingsSheet').classList.add('open');
+    });
+    document.getElementById('heatmapSettingsCloseBtn').addEventListener('click', function(){
+      document.getElementById('heatmapSettingsBackdrop').classList.remove('open');
+      document.getElementById('heatmapSettingsSheet').classList.remove('open');
+    });
+    document.getElementById('heatmapSettingsBackdrop').addEventListener('click', function(){
+      document.getElementById('heatmapSettingsBackdrop').classList.remove('open');
+      document.getElementById('heatmapSettingsSheet').classList.remove('open');
+    });
+    document.getElementById('heatmapManualToggle').addEventListener('change', async function(){
+      heatmapRefreshSettings.mode = this.checked ? 'manual' : 'auto';
+      await saveHeatmapRefreshSettings();
+      renderHeatmapSettingsSheet();
+      startHeatmapAutoRefreshIfNeeded();
+    });
+    document.querySelectorAll('#heatmapIntervalChips .chip').forEach(function(c){
+      c.addEventListener('click', async function(){
+        heatmapRefreshSettings.intervalSec = parseInt(c.getAttribute('data-interval'), 10);
+        heatmapRefreshSettings.mode = 'auto';
+        await saveHeatmapRefreshSettings();
+        renderHeatmapSettingsSheet();
+        var manualToggle = document.getElementById('heatmapManualToggle');
+        manualToggle.checked = false;
+        startHeatmapAutoRefreshIfNeeded();
+      });
     });
     document.getElementById('dividendBackBtn').addEventListener('click', function(){
       document.getElementById('dividendScreen').classList.remove('open');
@@ -9139,6 +9238,7 @@ window.addEventListener('error', function(ev){
       otherAssets = await loadOtherAssets();
       tickerRegistry = await loadTickerRegistry();
       stageIconSettings = await loadStageIconSettings();
+      heatmapRefreshSettings = await loadHeatmapRefreshSettings();
       await migrateEntryAccounts();
       currentPrices = await loadCurrentPrices();
       previousPrices = await loadPreviousPrices();
