@@ -2072,10 +2072,12 @@
     <div class="chiprow" id="judgmentTabChips" style="margin-bottom:16px;">
       <button class="chip" data-tab="cycle" type="button">📈 상승 사이클 감지</button>
       <button class="chip" data-tab="marketrisk" type="button">📊 시장 위험</button>
+      <button class="chip" data-tab="stockrisk" type="button">🔍 종목 위험</button>
       <button class="chip" data-tab="sell" type="button">📋 매도 의사결정</button>
     </div>
     <div id="cycleDetectBody"></div>
     <div id="marketRiskBody"></div>
+    <div id="stockRiskBody"></div>
     <div id="sellChecklistBody"></div>
   </div>
 </div>
@@ -2283,6 +2285,633 @@
     <p class="toast" id="pwToast"></p>
   </div>
 </div>
+
+<script>
+/*
+ * 투자일지 V2 - 종목 위험 검증 V1.1
+ * --------------------------------
+ * 목적:
+ *   시장 전체 위험(V2 Market Risk)과 별개로,
+ *   개별 종목의 가격/추세/상대강도/변동성 위험을 0~100점으로 평가한다.
+ *
+ * 점수 방향:
+ *   0 = 정상 / 100 = 고위험
+ *
+ * V1.1 구성:
+ *   1) 추세 훼손       35점
+ *   2) 52주 고점 대비  10점
+ *   3) 시장 대비 약세  25점
+ *   4) 변동성          15점
+ *   5) 급락·급변       15점
+ *   --------------------------------
+ *                   100점
+ *
+ * V1.0 대비 변경:
+ *   - 추세/상대강도 비중 확대
+ *   - 단순 고점 대비 하락 비중 축소
+ *   - 급락·급변 비중 확대
+ *
+ * 주의:
+ *   V1은 "가격 기반 종목 위험" 엔진이다.
+ *   PER/ROE/실적/뉴스/수급/투자논리는 포함하지 않는다.
+ *   투자논리 점검은 현재 V2의 기존 16점 엔진을 별도로 사용한다.
+ *
+ * 입력 데이터는 아래 형태를 권장한다.
+ *
+ * stockHistory = [
+ *   { date:'2026-09-01', close: 100000, volume: 1200000 },
+ *   ...
+ * ]
+ *
+ * marketHistory = [
+ *   { date:'2026-09-01', close: 2800 },
+ *   ...
+ * ]
+ *
+ * 최소한 최근 252거래일 이상의 종목 가격 데이터가 있으면
+ * 52주 고점/장기 추세를 안정적으로 계산할 수 있다.
+ */
+
+(function(global){
+  'use strict';
+
+  const CONFIG = {
+    weights: {
+      trend: 25,
+      high52: 20,
+      relative: 20,
+      volatility: 15,
+      crash: 10
+    },
+
+    tiers: [
+      { max: 19,  key:'NORMAL',   label:'정상',       icon:'🟢' },
+      { max: 39,  key:'WATCH',    label:'관찰',       icon:'🟡' },
+      { max: 59,  key:'CAUTION',  label:'위험 경계',  icon:'🟠' },
+      { max: 79,  key:'EXPAND',   label:'위험 확대',  icon:'🔴' },
+      { max:100,  key:'HIGH',     label:'고위험',     icon:'🚨' }
+    ]
+  };
+
+  function clamp(n, min, max){
+    return Math.max(min, Math.min(max, Number(n) || 0));
+  }
+
+  function num(v){
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function pct(v){
+    return num(v) == null ? null : num(v);
+  }
+
+  function sortHistory(history){
+    return (Array.isArray(history) ? history : [])
+      .filter(x => x && num(x.close) != null)
+      .map(x => ({
+        date: x.date || '',
+        close: num(x.close),
+        volume: num(x.volume)
+      }))
+      .sort((a,b) => String(a.date).localeCompare(String(b.date)));
+  }
+
+  function lastClose(history){
+    const h = sortHistory(history);
+    return h.length ? h[h.length - 1].close : null;
+  }
+
+  function returnPct(history, days){
+    const h = sortHistory(history);
+    if(h.length <= days) return null;
+    const now = h[h.length - 1].close;
+    const prev = h[h.length - 1 - days].close;
+    if(!prev) return null;
+    return (now / prev - 1) * 100;
+  }
+
+  function highestClose(history, days){
+    const h = sortHistory(history);
+    if(!h.length) return null;
+    const slice = h.slice(Math.max(0, h.length - days));
+    return Math.max(...slice.map(x => x.close));
+  }
+
+  function sma(history, days){
+    const h = sortHistory(history);
+    if(h.length < days) return null;
+    const slice = h.slice(-days);
+    return slice.reduce((s,x) => s + x.close, 0) / days;
+  }
+
+  function smaAt(history, endIndex, days){
+    const h = sortHistory(history);
+    if(endIndex < days - 1) return null;
+    const slice = h.slice(endIndex - days + 1, endIndex + 1);
+    if(slice.length !== days) return null;
+    return slice.reduce((s,x) => s + x.close, 0) / days;
+  }
+
+  function slopePct(history, days){
+    const h = sortHistory(history);
+    if(h.length < days + 5) return null;
+    const now = sma(history, days);
+    const oldIndex = h.length - 1 - Math.max(5, Math.floor(days * 0.25));
+    const old = smaAt(h, oldIndex, days);
+    if(now == null || old == null || old === 0) return null;
+    return (now / old - 1) * 100;
+  }
+
+  function dailyReturns(history, days){
+    const h = sortHistory(history);
+    const slice = h.slice(Math.max(1, h.length - days));
+    const out = [];
+    for(let i=1; i<slice.length; i++){
+      const p = slice[i-1].close;
+      const c = slice[i].close;
+      if(p > 0) out.push(c / p - 1);
+    }
+    return out;
+  }
+
+  function stdDev(values){
+    if(!values.length) return null;
+    const mean = values.reduce((s,v) => s+v, 0) / values.length;
+    const variance = values.reduce((s,v) => s + Math.pow(v-mean,2), 0) / values.length;
+    return Math.sqrt(variance);
+  }
+
+  /*
+   * 1. 추세 훼손 25점 (내부 원점수, V1.1에서는 35점으로 환산)
+   *
+   * 이동평균 구조 15점:
+   *   주가 > 20 > 60 > 120 : 0
+   *   20일선 이탈/하향      : 3
+   *   20 + 60 이탈          : 6
+   *   60일선 하향           : 9
+   *   120일선까지 이탈      : 12
+   *   장기 추세 훼손        : 15
+   *
+   * 방향성 10점:
+   *   20/60/120일선의 하락 방향이 많을수록 점수 증가
+   */
+  function scoreTrend(history){
+    const h = sortHistory(history);
+    if(h.length < 20){
+      return {
+        score: 0,
+        available:false,
+        detail:'데이터 부족'
+      };
+    }
+
+    const price = h[h.length-1].close;
+    const ma20  = sma(h,20);
+    const ma60  = sma(h,60);
+    const ma120 = sma(h,120);
+
+    let structure = 0;
+
+    if(ma20 != null && price < ma20) structure += 3;
+
+    if(ma60 != null && price < ma60){
+      structure = Math.max(structure, 6);
+    }
+
+    if(ma60 != null && ma20 != null && price < ma20 && price < ma60){
+      structure = Math.max(structure, 6);
+    }
+
+    if(ma60 != null && ma20 != null){
+      const ma20Slope = slopePct(h,20);
+      if(ma20Slope != null && ma20Slope < -2){
+        structure = Math.max(structure, 9);
+      }
+    }
+
+    if(ma120 != null && price < ma120){
+      structure = Math.max(structure, 12);
+    }
+
+    if(ma120 != null){
+      const ma120Slope = slopePct(h,120);
+      if(ma120Slope != null && ma120Slope < -3){
+        structure = Math.max(structure, 15);
+      }
+    }
+
+    let direction = 0;
+    const s20 = slopePct(h,20);
+    const s60 = slopePct(h,60);
+    const s120 = slopePct(h,120);
+
+    [s20,s60,s120].forEach((s,i) => {
+      if(s != null && s < -3){
+        direction += i === 0 ? 3 : (i === 1 ? 3 : 4);
+      }
+    });
+
+    direction = clamp(direction, 0, 10);
+
+    return {
+      score: clamp(Math.max(structure, direction),0,25),
+      available:true,
+      price,
+      ma20,
+      ma60,
+      ma120,
+      structureScore:structure,
+      directionScore:direction
+    };
+  }
+
+  /*
+   * 2. 52주 고점 대비 하락 20점 (내부 원점수, V1.1에서는 10점으로 환산)
+   *   0~5%   : 0
+   *   5~10%  : 4
+   *   10~15% : 8
+   *   15~20% : 12
+   *   20~30% : 16
+   *   30%+   : 20
+   */
+  function scoreHigh52(history){
+    const h = sortHistory(history);
+    if(!h.length){
+      return {score:0, available:false, detail:'데이터 부족'};
+    }
+
+    const price = h[h.length-1].close;
+    const high52 = highestClose(h,252);
+
+    if(high52 == null || high52 <= 0){
+      return {score:0, available:false, detail:'52주 고점 계산 불가'};
+    }
+
+    const drawdown = (1 - price/high52) * 100;
+    let score = 0;
+
+    if(drawdown < 5) score = 0;
+    else if(drawdown < 10) score = 4;
+    else if(drawdown < 15) score = 8;
+    else if(drawdown < 20) score = 12;
+    else if(drawdown < 30) score = 16;
+    else score = 20;
+
+    return {
+      score,
+      available:true,
+      price,
+      high52,
+      drawdown
+    };
+  }
+
+  /*
+   * 3. 시장 대비 상대강도 20점 (내부 원점수, V1.1에서는 25점으로 환산)
+   *
+   * 20일 상대강도 12점:
+   *   시장 대비 +5% 이상 : 0
+   *   +2~+5              : 1
+   *   -2~+2              : 3
+   *   -5~-2              : 6
+   *   -10~-5             : 9
+   *   -10% 이하          : 12
+   *
+   * 60일 상대강도 8점:
+   *   +10% 이상 : 0
+   *   +5~10     : 1
+   *   0~5       : 2
+   *   -5~0      : 4
+   *   -10~-5    : 6
+   *   -10 이하  : 8
+   */
+  function scoreRelative(stockHistory, marketHistory){
+    const sr20 = returnPct(stockHistory,20);
+    const sr60 = returnPct(stockHistory,60);
+    const mr20 = returnPct(marketHistory,20);
+    const mr60 = returnPct(marketHistory,60);
+
+    if(sr20 == null || mr20 == null){
+      return {score:0, available:false, detail:'시장 데이터 부족'};
+    }
+
+    const rel20 = sr20 - mr20;
+    const rel60 = (sr60 != null && mr60 != null) ? sr60 - mr60 : null;
+
+    let s20 = 0;
+    if(rel20 >= 5) s20 = 0;
+    else if(rel20 >= 2) s20 = 1;
+    else if(rel20 > -2) s20 = 3;
+    else if(rel20 > -5) s20 = 6;
+    else if(rel20 > -10) s20 = 9;
+    else s20 = 12;
+
+    let s60 = 0;
+    if(rel60 != null){
+      if(rel60 >= 10) s60 = 0;
+      else if(rel60 >= 5) s60 = 1;
+      else if(rel60 >= 0) s60 = 2;
+      else if(rel60 > -5) s60 = 4;
+      else if(rel60 > -10) s60 = 6;
+      else s60 = 8;
+    }
+
+    return {
+      score: clamp(s20+s60,0,20),
+      available:true,
+      stock20:sr20,
+      market20:mr20,
+      relative20:rel20,
+      stock60:sr60,
+      market60:mr60,
+      relative60:rel60,
+      score20:s20,
+      score60:s60
+    };
+  }
+
+  /*
+   * 4. 변동성 15점
+   *
+   * V1은 종목 자체의 최근 20거래일 일간 변동성을
+   * 1년 수준과 비교한다.
+   *
+   * 최근 연율화 변동성 / 252일 연율화 변동성 비율:
+   *   <= 1.00 : 0
+   *   <= 1.20 : 3
+   *   <= 1.50 : 6
+   *   <= 2.00 : 10
+   *   >  2.00 : 15
+   */
+  function scoreVolatility(history){
+    const h = sortHistory(history);
+    if(h.length < 60){
+      return {score:0, available:false, detail:'변동성 계산 데이터 부족'};
+    }
+
+    const recent = dailyReturns(h,20);
+    const base = dailyReturns(h,252);
+
+    if(recent.length < 10 || base.length < 40){
+      return {score:0, available:false, detail:'변동성 계산 데이터 부족'};
+    }
+
+    const recentVol = stdDev(recent) * Math.sqrt(252) * 100;
+    const baseVol = stdDev(base) * Math.sqrt(252) * 100;
+
+    if(!baseVol){
+      return {score:0, available:false, detail:'기준 변동성 계산 불가'};
+    }
+
+    const ratio = recentVol / baseVol;
+
+    let score = 0;
+    if(ratio <= 1.00) score = 0;
+    else if(ratio <= 1.20) score = 3;
+    else if(ratio <= 1.50) score = 6;
+    else if(ratio <= 2.00) score = 10;
+    else score = 15;
+
+    return {
+      score,
+      available:true,
+      recentVol,
+      baseVol,
+      ratio
+    };
+  }
+
+  /*
+   * 5. 급락·급변 10점 (내부 원점수, V1.1에서는 15점으로 환산)
+   *
+   * 최근 5거래일 수익률:
+   *   >= 0       : 0
+   *   -3%~0      : 1
+   *   -5~-3      : 3
+   *   -8~-5      : 5
+   *   -12~-8     : 7
+   *   <= -12     : 10
+   */
+  function scoreCrash(history){
+    const r5 = returnPct(history,5);
+    if(r5 == null){
+      return {score:0, available:false, detail:'5일 데이터 부족'};
+    }
+
+    let score = 0;
+    if(r5 >= 0) score = 0;
+    else if(r5 > -3) score = 1;
+    else if(r5 > -5) score = 3;
+    else if(r5 > -8) score = 5;
+    else if(r5 > -12) score = 7;
+    else score = 10;
+
+    return {
+      score,
+      available:true,
+      return5:r5
+    };
+  }
+
+  function getTier(score){
+    const s = clamp(Math.round(score),0,100);
+    return CONFIG.tiers.find(t => s <= t.max) || CONFIG.tiers[CONFIG.tiers.length-1];
+  }
+
+  function riskDirection(todayScore, previousScore){
+    if(previousScore == null) return 'NEW';
+    const diff = todayScore - previousScore;
+    if(diff >= 8) return 'UP_FAST';
+    if(diff >= 2) return 'UP';
+    if(diff <= -8) return 'DOWN_FAST';
+    if(diff <= -2) return 'DOWN';
+    return 'FLAT';
+  }
+
+  function directionLabel(direction){
+    return {
+      NEW:'신규 진단',
+      UP_FAST:'위험 급증',
+      UP:'위험 증가',
+      FLAT:'위험 유지',
+      DOWN:'위험 완화',
+      DOWN_FAST:'위험 급감'
+    }[direction] || '위험 유지';
+  }
+
+  /*
+   * 전체 진단
+   *
+   * previousScore는 선택 사항.
+   * history의 마지막 시점에서 한 번 계산한 점수만 넣으면
+   * 위험 방향도 함께 표시할 수 있다.
+   */
+  function analyze(stockHistory, marketHistory, options){
+    options = options || {};
+
+    const trend = scoreTrend(stockHistory);
+    const high52 = scoreHigh52(stockHistory);
+    const relative = scoreRelative(stockHistory, marketHistory);
+    const volatility = scoreVolatility(stockHistory);
+    const crash = scoreCrash(stockHistory);
+
+    /*
+     * V1.1 가중치
+     *   추세 35 / 고점거리 10 / 상대강도 25 / 변동성 15 / 급락 15
+     *
+     * 기존 각 함수는 V1.0의 내부 최대점(25/20/20/15/10)을
+     * 유지하고, 여기서 V1.1 가중치로 환산한다.
+     */
+    const weights = CONFIG.weights;
+    const weightedTotal =
+      (trend.score / 25) * weights.trend +
+      (high52.score / 20) * weights.high52 +
+      (relative.score / 20) * weights.relative +
+      (volatility.score / 15) * weights.volatility +
+      (crash.score / 10) * weights.crash;
+
+    const score = clamp(weightedTotal, 0, 100);
+    const tier = getTier(score);
+    const direction = riskDirection(score, options.previousScore);
+
+    const warnings = [];
+
+    if(trend.score >= 9){
+      warnings.push('중기 추세 훼손 신호');
+    } else if(trend.score >= 3){
+      warnings.push('단기 추세 약화');
+    }
+
+    if(high52.drawdown != null && high52.drawdown >= 15){
+      warnings.push('52주 고점 대비 하락 확대');
+    }
+
+    if(relative.relative20 != null && relative.relative20 <= -5){
+      warnings.push('시장 대비 상대약세');
+    }
+
+    if(volatility.ratio != null && volatility.ratio > 1.5){
+      warnings.push('최근 변동성 급증');
+    }
+
+    if(crash.return5 != null && crash.return5 <= -8){
+      warnings.push('최근 급락');
+    }
+
+    const availableCount = [
+      trend, high52, relative, volatility, crash
+    ].filter(x => x.available).length;
+
+    return {
+      version:'V1.1',
+      score:Number(score.toFixed(1)),
+      rawScore:Number(weightedTotal.toFixed(2)),
+      rawMax:100,
+      tier,
+      direction,
+      directionLabel:directionLabel(direction),
+      warnings,
+      availableCount,
+      totalComponents:5,
+
+      breakdown:{
+        trend,
+        high52,
+        relative,
+        volatility,
+        crash
+      },
+
+      summary: tier.icon + ' ' + tier.label + ' · ' + score.toFixed(1) + '/100'
+    };
+  }
+
+  /*
+   * UI에 바로 넣을 수 있는 간단한 HTML 생성기.
+   * 투자일지 V2의 기존 CSS 변수와 함께 사용할 수 있도록
+   * 색상 자체는 최소화하고 클래스 중심으로 반환한다.
+   */
+  function render(result){
+    if(!result) return '';
+
+    const b = result.breakdown;
+
+    function row(label, item, max){
+      const baseMax = ({'추세 훼손':25,'52주 고점 대비 하락':20,'시장 대비 상대강도':20,'변동성':15,'급락·급변':10})[label] || max;
+      const raw = item && item.score != null ? item.score : 0;
+      const s = Math.min(max, (raw / baseMax) * max);
+      return `
+        <div class="stock-risk-v1-row">
+          <div class="stock-risk-v1-row-head">
+            <span>${label}</span>
+            <strong>${s.toFixed(0)} / ${max}</strong>
+          </div>
+          <div class="stock-risk-v1-bar">
+            <span style="width:${Math.min(100,(s/max)*100)}%"></span>
+          </div>
+        </div>`;
+    }
+
+    const warningHtml = result.warnings.length
+      ? `<ul class="stock-risk-v1-warnings">${
+          result.warnings.map(x => `<li>⚠️ ${x}</li>`).join('')
+        }</ul>`
+      : `<p class="stock-risk-v1-empty">현재 뚜렷한 종목 위험 신호가 많지 않습니다.</p>`;
+
+    return `
+      <section class="stock-risk-v1-card">
+        <div class="stock-risk-v1-title">🔍 종목 위험 검증 V1</div>
+
+        <div class="stock-risk-v1-summary">
+          <div>
+            <div class="stock-risk-v1-tier">${result.tier.icon} ${result.tier.label}</div>
+            <div class="stock-risk-v1-direction">${result.directionLabel}</div>
+          </div>
+          <div class="stock-risk-v1-score">${result.score.toFixed(1)}<small>/100</small></div>
+        </div>
+
+        ${row('추세 훼손', b.trend, 35)}
+        ${row('52주 고점 대비 하락', b.high52, 10)}
+        ${row('시장 대비 상대강도', b.relative, 25)}
+        ${row('변동성', b.volatility, 15)}
+        ${row('급락·급변', b.crash, 15)}
+
+        <div class="stock-risk-v1-warning-box">
+          <strong>위험 신호</strong>
+          ${warningHtml}
+        </div>
+
+        <p class="stock-risk-v1-note">
+          ※ 가격·추세 기반 위험 진단입니다.
+          투자논리·실적·펀더멘털 판단은 기존 투자논리 점검에서 별도로 확인하세요.
+        </p>
+      </section>`;
+  }
+
+  const api = {
+    CONFIG,
+    analyze,
+    render,
+    scoreTrend,
+    scoreHigh52,
+    scoreRelative,
+    scoreVolatility,
+    scoreCrash,
+    getTier,
+    returnPct,
+    sma
+  };
+
+  if(typeof module !== 'undefined' && module.exports){
+    module.exports = api;
+  } else {
+    global.StockRiskV1 = api;
+  }
+
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
 
 <script>
 window.addEventListener('error', function(ev){
@@ -2683,6 +3312,10 @@ window.addEventListener('error', function(ev){
   var CYCLE_STATE_LOCAL_KEY = 'investment_journal_cyclestate_v1';
   var cycleState = { stage:null, signals:{}, note:'' };
   var judgmentActiveTab = 'cycle';
+  var stockRiskTicker = null;
+  var stockRiskHistoryCache = {}; // { [ticker]: {stockHistory, marketHistory, fetchedAt} }
+  var stockRiskLoading = false;
+  var stockRiskError = null;
   function switchJudgmentTab(tab){
     judgmentActiveTab = tab;
     document.querySelectorAll('#judgmentTabChips .chip').forEach(function(c){
@@ -2690,12 +3323,15 @@ window.addEventListener('error', function(ev){
     });
     document.getElementById('cycleDetectBody').style.display = (tab === 'cycle') ? 'block' : 'none';
     document.getElementById('marketRiskBody').style.display = (tab === 'marketrisk') ? 'block' : 'none';
+    document.getElementById('stockRiskBody').style.display = (tab === 'stockrisk') ? 'block' : 'none';
     document.getElementById('sellChecklistBody').style.display = (tab === 'sell') ? 'block' : 'none';
     document.getElementById('manageChecklistBtn').style.visibility = (tab === 'sell') ? 'visible' : 'hidden';
     if(tab === 'cycle'){
       renderCycleDetectScreen();
     }else if(tab === 'marketrisk'){
       renderMarketRiskScreen();
+    }else if(tab === 'stockrisk'){
+      renderStockRiskScreen();
     }else{
       renderSellChecklistScreen();
     }
@@ -5232,6 +5868,208 @@ window.addEventListener('error', function(ev){
    * [E] 시장 위험 화면
    * 기존 renderMarketRiskScreen() 전체 교체
    * ============================================================ */
+
+  async function fetchStockRiskData(ticker){
+    var symbol = getTickerSymbol(ticker);
+    if(!symbol){
+      stockRiskError = '이 종목에 심볼(종목코드)이 등록되어 있지 않아요. 자산관리 화면에서 심볼을 먼저 입력해주세요.';
+      stockRiskLoading = false;
+      renderStockRiskScreen();
+      return;
+    }
+    stockRiskLoading = true;
+    stockRiskError = null;
+    renderStockRiskScreen();
+    try{
+      var resp = await fetch('/api/stock-history?code='+encodeURIComponent(symbol)+'&count=300');
+      var data = await resp.json();
+      if(!resp.ok || data.error){
+        throw new Error(data.error || '시세 조회에 실패했어요.');
+      }
+      var indexKey = getTickerIndex(ticker) || 'kospi';
+      var marketHistory = (mkrHistory || []).map(function(s){
+        return { date: s.date, close: s[indexKey] };
+      }).filter(function(s){ return s.close != null && isFinite(s.close); });
+
+      stockRiskHistoryCache[ticker] = {
+        stockHistory: data.history,
+        marketHistory: marketHistory,
+        fetchedAt: Date.now()
+      };
+    }catch(err){
+      stockRiskError = err.message || '시세 조회 중 오류가 발생했어요.';
+    }
+    stockRiskLoading = false;
+    renderStockRiskScreen();
+  }
+
+  function computeStockOverallVerdict(stockRisk, thesisGrade){
+    var priceBad = stockRisk.tier.key === 'EXPAND' || stockRisk.tier.key === 'HIGH';
+    var priceCaution = stockRisk.tier.key === 'CAUTION';
+    var thesisBad = thesisGrade && thesisGrade.tone !== 'good';
+
+    if(priceBad && thesisBad){
+      return { icon:'🔴', label:'매도 검토', desc:'종목 가격 위험이 확대되고 있으며\n투자논리도 일부 약화되었습니다.' };
+    }
+    if(priceBad && !thesisBad){
+      return { icon:'🟠', label:'주의 관찰', desc:'투자논리는 아직 유효하지만\n가격 위험이 확대되고 있어 주의가 필요합니다.' };
+    }
+    if(!priceBad && thesisBad){
+      return { icon:'🟠', label:'투자논리 재점검', desc:'가격 위험은 아직 낮은 편이지만\n투자논리가 약화되고 있어 점검이 필요합니다.' };
+    }
+    if(priceCaution){
+      return { icon:'🟡', label:'관찰 지속', desc:'가격·투자논리 모두 아직 심각한 수준은 아니지만\n주의 깊게 지켜볼 필요가 있습니다.' };
+    }
+    return { icon:'🟢', label:'보유 유지', desc:'가격 위험이 낮고 투자논리도 유지되고 있습니다.' };
+  }
+
+  function renderStockRiskScreen(){
+    var body = document.getElementById('stockRiskBody');
+    if(typeof StockRiskV1 === 'undefined'){
+      body.innerHTML = '<p class="empty-inline">종목 위험 엔진을 불러오지 못했어요.</p>';
+      return;
+    }
+
+    var holdings = computeHoldings();
+    if(holdings.length === 0){
+      body.innerHTML = '<p class="empty-inline">보유 중인 종목이 없어요. 먼저 매수 기록을 남겨주세요.</p>';
+      return;
+    }
+    if(!stockRiskTicker || !holdings.find(function(h){ return h.ticker === stockRiskTicker; })){
+      stockRiskTicker = holdings[0].ticker;
+    }
+
+    var html = '';
+    html += '<p class="card-title">🔍 종목 위험 검증</p>';
+    html += '<div class="field"><span class="field-label">진단 종목</span><select id="stockRiskTickerSelect" class="select-pill">';
+    holdings.forEach(function(h){
+      html += '<option value="'+escapeHtml(h.ticker)+'"'+(stockRiskTicker===h.ticker?' selected':'')+'>'+escapeHtml(h.ticker)+'</option>';
+    });
+    html += '</select></div>';
+
+    var cached = stockRiskHistoryCache[stockRiskTicker];
+
+    if(stockRiskLoading){
+      html += '<p class="savehint" style="margin-top:14px;">시세를 불러오는 중이에요…</p>';
+      body.innerHTML = html;
+      wireStockRiskEvents();
+      return;
+    }
+
+    if(stockRiskError){
+      html += '<p class="savehint" style="margin-top:14px;color:var(--brick);">⚠️ '+escapeHtml(stockRiskError)+'</p>';
+      html += '<button class="cancelbtn" id="stockRiskRetryBtn" type="button" style="width:100%;margin-top:8px;">다시 시도</button>';
+      body.innerHTML = html;
+      wireStockRiskEvents();
+      return;
+    }
+
+    if(!cached){
+      html += '<button class="savebtn" id="stockRiskFetchBtn" type="button" style="width:100%;margin-top:14px;">🔍 위험 진단 시작</button>';
+      body.innerHTML = html;
+      wireStockRiskEvents();
+      return;
+    }
+
+    var result = StockRiskV1.analyze(cached.stockHistory, cached.marketHistory);
+    var b = result.breakdown;
+
+    function itemRow(label, item, max, rawMax){
+      var raw = (item && item.score != null) ? item.score : 0;
+      var scaled = Math.round(raw); // 원점수를 그대로(사용자 레이아웃은 원점수 스케일: /25,/20,/20,/15,/10)
+      var pct = rawMax > 0 ? Math.min(100, (raw/rawMax)*100) : 0;
+      var color = pct >= 70 ? 'var(--brick)' : (pct >= 40 ? 'var(--amber)' : 'var(--pine)');
+      var icon = pct >= 70 ? '🔴' : (pct >= 40 ? '🟠' : '🟢');
+      var h = '<div style="margin-bottom:10px;">';
+      h += '<div style="display:flex;justify-content:space-between;font-size:13px;"><span>'+label+'</span><b style="color:'+color+';">'+icon+' '+scaled+'/'+max+'</b></div>';
+      h += '<div style="height:7px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:4px;"><div style="height:100%;width:'+pct+'%;background:'+color+';border-radius:4px;"></div></div>';
+      h += '</div>';
+      return h;
+    }
+
+    html += '<div style="height:1px;background:var(--line);margin:16px 0;"></div>';
+
+    html += '<p class="field-label field-label-strong">종목 위험</p>';
+    html += '<div class="rule-card" style="text-align:center;margin-bottom:14px;">';
+    html += '<p style="font-size:26px;font-weight:700;color:'+(result.tier.key==='EXPAND'||result.tier.key==='HIGH'?'var(--brick)':(result.tier.key==='CAUTION'?'var(--amber)':'var(--pine)'))+';">'+result.tier.icon+' '+result.score.toFixed(0)+' <span style="font-size:15px;color:var(--ink-faint);">/ 100</span></p>';
+    html += '<p style="font-size:14px;font-weight:700;">'+result.tier.label+'</p>';
+    html += '</div>';
+
+    html += itemRow('추세 훼손', b.trend, 25, 25);
+    html += itemRow('52주 고점 대비', b.high52, 20, 20);
+    html += itemRow('시장 대비 약세', b.relative, 20, 20);
+    html += itemRow('변동성', b.volatility, 15, 15);
+    html += itemRow('급락 위험', b.crash, 10, 10);
+
+    html += '<p class="field-label field-label-strong" style="margin-top:16px;">⚠️ 위험 신호</p>';
+    if(result.warnings.length === 0){
+      html += '<p class="empty-inline">뚜렷한 위험 신호가 없어요.</p>';
+    }else{
+      html += '<ul style="margin:0;padding-left:18px;">';
+      result.warnings.forEach(function(w){ html += '<li style="font-size:13px;margin-bottom:4px;">'+escapeHtml(w)+'</li>'; });
+      html += '</ul>';
+    }
+
+    html += '<div style="height:1px;background:var(--line);margin:20px 0;"></div>';
+
+    // 투자논리 / 보유확신 (기존 매도의사결정 탭의 진단 결과를 그대로 재사용)
+    var ilState = getInvestLogicState(stockRiskTicker);
+    var thesisAnswered = computeThesisAnsweredCount(ilState.checksA);
+    var thesisScore = computeThesisScore(ilState.checksA);
+    var thesisGrade = thesisAnswered > 0 ? gradeForThesisScore(thesisScore) : null;
+    var holdConviction = computeHoldConviction(ilState.holdAnswers);
+
+    html += '<p class="field-label field-label-strong">🧠 투자논리</p>';
+    html += '<div class="rule-card" style="text-align:center;margin-bottom:14px;">';
+    if(thesisAnswered > 0){
+      var thesisToneColor = { good:'var(--pine)', caution:'var(--amber)', warn:'var(--amber)', bad:'var(--brick)' }[thesisGrade.tone] || 'var(--ink)';
+      html += '<p style="font-size:22px;font-weight:700;">'+thesisScore+' <span style="font-size:14px;color:var(--ink-faint);">/ '+THESIS_MAX_SCORE+'</span></p>';
+      html += '<p style="font-size:14px;font-weight:700;color:'+thesisToneColor+';">'+thesisGrade.emoji+' '+thesisGrade.label+'</p>';
+    }else{
+      html += '<p class="empty-inline">아직 투자논리를 점검하지 않았어요. "매도 의사결정" 탭에서 먼저 점검해주세요.</p>';
+    }
+    html += '</div>';
+
+    html += '<p class="field-label field-label-strong">💪 보유 확신</p>';
+    html += '<div class="rule-card" style="text-align:center;margin-bottom:14px;">';
+    if(holdConviction){
+      html += '<p style="font-size:18px;font-weight:700;color:'+holdConviction.color+';">'+holdConviction.emoji+' '+holdConviction.level+'</p>';
+    }else{
+      html += '<p class="empty-inline">아직 응답하지 않았어요.</p>';
+    }
+    html += '</div>';
+
+    html += '<div style="height:1px;background:var(--line);margin:20px 0;"></div>';
+
+    var verdict = computeStockOverallVerdict(result, thesisGrade);
+    html += '<p class="field-label field-label-strong">⚖️ 종합 판단</p>';
+    html += '<div class="rule-card" style="text-align:center;">';
+    html += '<p style="font-size:18px;font-weight:700;margin-bottom:8px;">'+verdict.icon+' '+verdict.label+'</p>';
+    html += '<p style="font-size:13.5px;color:var(--ink-soft);white-space:pre-line;">'+escapeHtml(verdict.desc)+'</p>';
+    html += '</div>';
+
+    html += '<button class="cancelbtn" id="stockRiskRefreshBtn" type="button" style="width:100%;margin-top:16px;">🔄 최신 시세로 다시 진단</button>';
+
+    body.innerHTML = html;
+    wireStockRiskEvents();
+  }
+
+  function wireStockRiskEvents(){
+    var sel = document.getElementById('stockRiskTickerSelect');
+    if(sel){
+      sel.addEventListener('change', function(){
+        stockRiskTicker = this.value;
+        stockRiskError = null;
+        renderStockRiskScreen();
+      });
+    }
+    var fetchBtn = document.getElementById('stockRiskFetchBtn');
+    if(fetchBtn) fetchBtn.addEventListener('click', function(){ fetchStockRiskData(stockRiskTicker); });
+    var retryBtn = document.getElementById('stockRiskRetryBtn');
+    if(retryBtn) retryBtn.addEventListener('click', function(){ fetchStockRiskData(stockRiskTicker); });
+    var refreshBtn = document.getElementById('stockRiskRefreshBtn');
+    if(refreshBtn) refreshBtn.addEventListener('click', function(){ fetchStockRiskData(stockRiskTicker); });
+  }
 
   function renderMarketRiskScreen(){
 
