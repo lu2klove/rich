@@ -5869,6 +5869,32 @@ window.addEventListener('error', function(ev){
    * 기존 renderMarketRiskScreen() 전체 교체
    * ============================================================ */
 
+  var stockRiskDateWarning = null;
+
+  // 종목 시세(방금 API로 받은 최신 데이터)와 시장 시세(mkrHistory, 사용자가
+  // 직접 채워온 데이터라 최신 날짜가 다를 수 있음)의 "마지막 날짜"를 맞춰요.
+  // 이걸 안 맞추면 "최근 20일" 같은 계산이 서로 다른 실제 기간을 비교하게 돼서
+  // 시장 대비 강약 판단이 부정확해질 수 있어요.
+  function alignHistoriesByDate(stockHistory, marketHistory){
+    if(!stockHistory.length || !marketHistory.length){
+      return { stockHistory: stockHistory, marketHistory: marketHistory, warning: null };
+    }
+    var stockLast = stockHistory[stockHistory.length - 1].date;
+    var marketLast = marketHistory[marketHistory.length - 1].date;
+    if(stockLast === marketLast) return { stockHistory: stockHistory, marketHistory: marketHistory, warning: null };
+
+    var commonLast = stockLast < marketLast ? stockLast : marketLast;
+    var trimmedStock = stockHistory.filter(function(x){ return x.date <= commonLast; });
+    var trimmedMarket = marketHistory.filter(function(x){ return x.date <= commonLast; });
+
+    var dayDiff = Math.round((new Date(stockLast > marketLast ? stockLast : marketLast) - new Date(commonLast)) / 86400000);
+    var warning = null;
+    if(dayDiff >= 3){
+      warning = (stockLast > marketLast ? '시장' : '종목') + ' 시세가 최근 ' + dayDiff + '일 전 기준이라, 그 시점까지 맞춰서 계산했어요.';
+    }
+    return { stockHistory: trimmedStock, marketHistory: trimmedMarket, warning: warning };
+  }
+
   async function fetchStockRiskData(ticker){
     var symbol = getTickerSymbol(ticker);
     if(!symbol){
@@ -5887,13 +5913,16 @@ window.addEventListener('error', function(ev){
         throw new Error(data.error || '시세 조회에 실패했어요.');
       }
       var indexKey = getTickerIndex(ticker) || 'kospi';
-      var marketHistory = (mkrHistory || []).map(function(s){
+      var marketHistoryRaw = (mkrHistory || []).map(function(s){
         return { date: s.date, close: s[indexKey] };
       }).filter(function(s){ return s.close != null && isFinite(s.close); });
 
+      var aligned = alignHistoriesByDate(data.history, marketHistoryRaw);
+      stockRiskDateWarning = aligned.warning;
+
       stockRiskHistoryCache[ticker] = {
-        stockHistory: data.history,
-        marketHistory: marketHistory,
+        stockHistory: aligned.stockHistory,
+        marketHistory: aligned.marketHistory,
         fetchedAt: Date.now()
       };
     }catch(err){
@@ -5935,15 +5964,20 @@ window.addEventListener('error', function(ev){
       body.innerHTML = '<p class="empty-inline">보유 중인 종목이 없어요. 먼저 매수 기록을 남겨주세요.</p>';
       return;
     }
-    if(!stockRiskTicker || !holdings.find(function(h){ return h.ticker === stockRiskTicker; })){
-      stockRiskTicker = holdings[0].ticker;
+    var seenTickers = {};
+    var uniqueTickers = [];
+    holdings.forEach(function(h){
+      if(!seenTickers[h.ticker]){ seenTickers[h.ticker] = true; uniqueTickers.push(h.ticker); }
+    });
+    if(!stockRiskTicker || uniqueTickers.indexOf(stockRiskTicker) === -1){
+      stockRiskTicker = uniqueTickers[0];
     }
 
     var html = '';
     html += '<p class="card-title">🔍 종목 위험 검증</p>';
     html += '<div class="field"><span class="field-label">진단 종목</span><select id="stockRiskTickerSelect" class="select-pill">';
-    holdings.forEach(function(h){
-      html += '<option value="'+escapeHtml(h.ticker)+'"'+(stockRiskTicker===h.ticker?' selected':'')+'>'+escapeHtml(h.ticker)+'</option>';
+    uniqueTickers.forEach(function(t){
+      html += '<option value="'+escapeHtml(t)+'"'+(stockRiskTicker===t?' selected':'')+'>'+escapeHtml(t)+'</option>';
     });
     html += '</select></div>';
 
@@ -5974,7 +6008,18 @@ window.addEventListener('error', function(ev){
     var result = StockRiskV1.analyze(cached.stockHistory, cached.marketHistory);
     var b = result.breakdown;
 
+    if(stockRiskDateWarning){
+      html += '<p class="savehint" style="color:var(--amber);margin-top:8px;">ℹ️ '+escapeHtml(stockRiskDateWarning)+'</p>';
+    }
+
     function itemRow(label, item, max, rawMax){
+      if(item && item.available === false){
+        var h0 = '<div style="margin-bottom:10px;">';
+        h0 += '<div style="display:flex;justify-content:space-between;font-size:13px;"><span>'+label+'</span><b style="color:var(--ink-faint);">⚪ 계산 불가</b></div>';
+        h0 += '<p style="font-size:11.5px;color:var(--ink-faint);margin-top:2px;">'+escapeHtml(item.detail||'데이터가 부족해요')+'</p>';
+        h0 += '</div>';
+        return h0;
+      }
       var raw = (item && item.score != null) ? item.score : 0;
       var scaled = Math.round(raw); // 원점수를 그대로(사용자 레이아웃은 원점수 스케일: /25,/20,/20,/15,/10)
       var pct = rawMax > 0 ? Math.min(100, (raw/rawMax)*100) : 0;
