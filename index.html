@@ -4382,6 +4382,126 @@ window.addEventListener('error', function(ev){
     document.getElementById('profitRankingBody').innerHTML = html;
   }
 
+  function renderChecklistManageScreen(){
+    var body = document.getElementById('checklistManageBody');
+    var html = '';
+    html += '<p class="card-title no-divider" style="margin-top:0;">📋 매도 점검 항목</p>';
+    html += '<p class="savehint" style="margin-top:0;">체크한 비율이 기준 이상이면 "매도 권장"이 돼요. 🚨 긴급으로 표시한 항목은 하나만 체크해도 매도 권장이에요.</p>';
+    html += '<div class="field"><span class="field-label field-label-strong">매도 권장 기준 (%)</span><input type="number" id="ckThresholdInput" min="1" max="100" value="'+sellChecklistThresholdPct+'" style="max-width:120px;"></div>';
+    if(checklistItems.length === 0){
+      html += '<p class="empty-inline">점검 항목이 없어요. 아래에서 추가해주세요.</p>';
+    }
+    checklistItems.forEach(function(it){
+      html += '<div class="checklist-manage-row">';
+      html += '<input type="text" class="holdQEditInput ckTextInput" data-id="'+escapeHtml(it.id)+'" value="'+escapeHtml(it.text)+'">';
+      html += '<button class="urgentToggleBtn ckUrgentBtn'+(it.urgent?' active':'')+'" data-id="'+escapeHtml(it.id)+'" type="button" aria-label="긴급 항목" title="긴급 항목">🚨</button>';
+      html += '<button class="danger holdQDelBtn ckDelBtn" data-id="'+escapeHtml(it.id)+'" type="button">삭제</button>';
+      html += '</div>';
+    });
+    html += '<div class="other-asset-form" style="margin-top:12px;">';
+    html += '<input type="text" id="ckNewText" placeholder="새 점검 항목 (예: 실적 쇼크)">';
+    html += '<button class="cancelbtn" id="ckAddBtn" type="button">추가</button>';
+    html += '</div>';
+    html += '<button class="cancelbtn" id="ckResetBtn" type="button" style="width:100%;margin-top:10px;">기본 항목으로 되돌리기</button>';
+
+    html += '<p class="card-title" style="margin-top:28px;">🤔 보유 확신 질문</p>';
+    html += '<p class="savehint" style="margin-top:0;">종목 위험 화면에서 보유 확신도를 점검할 때 쓰는 질문이에요.</p>';
+    if(HOLD_CONVICTION_QUESTIONS.length === 0){
+      html += '<p class="empty-inline">질문이 없어요. 아래에서 추가해주세요.</p>';
+    }
+    HOLD_CONVICTION_QUESTIONS.forEach(function(q){
+      html += '<div class="checklist-manage-row">';
+      html += '<input type="text" class="holdQEditInput hqTextInput" data-id="'+escapeHtml(q.id)+'" value="'+escapeHtml(q.text)+'">';
+      html += '<button class="danger holdQDelBtn hqDelBtn" data-id="'+escapeHtml(q.id)+'" type="button">삭제</button>';
+      html += '</div>';
+    });
+    html += '<div class="other-asset-form" style="margin-top:12px;">';
+    html += '<input type="text" id="hqNewText" placeholder="새 질문">';
+    html += '<button class="cancelbtn" id="hqAddBtn" type="button">추가</button>';
+    html += '</div>';
+    html += '<button class="cancelbtn" id="hqResetBtn" type="button" style="width:100%;margin-top:10px;">기본 질문으로 되돌리기</button>';
+    html += '<p class="toast" id="ckToast"></p>';
+    body.innerHTML = html;
+
+    function flash(msg){ var t = document.getElementById('ckToast'); if(t){ t.style.color = 'var(--pine)'; t.textContent = msg; setTimeout(function(){ if(t) t.textContent = ''; }, 1800); } }
+    function byId(list, id){ return list.find(function(x){ return x.id === id; }); }
+
+    document.getElementById('ckThresholdInput').addEventListener('change', async function(){
+      var v = parseFloat(this.value);
+      if(isNaN(v) || v < 1 || v > 100){ this.value = sellChecklistThresholdPct; return; }
+      sellChecklistThresholdPct = v;
+      await saveChecklistThreshold();
+      flash('기준을 저장했어요');
+    });
+    body.querySelectorAll('.ckTextInput').forEach(function(inp){
+      inp.addEventListener('change', async function(){
+        var it = byId(checklistItems, inp.getAttribute('data-id'));
+        if(!it) return;
+        var v = inp.value.trim();
+        if(!v){ inp.value = it.text; return; }
+        it.text = v; await saveChecklistItems(); flash('저장했어요');
+      });
+    });
+    body.querySelectorAll('.ckUrgentBtn').forEach(function(btn){
+      btn.addEventListener('click', async function(){
+        var it = byId(checklistItems, btn.getAttribute('data-id'));
+        if(!it) return;
+        it.urgent = !it.urgent; await saveChecklistItems(); btn.classList.toggle('active', !!it.urgent);
+      });
+    });
+    body.querySelectorAll('.ckDelBtn').forEach(function(btn){
+      btn.addEventListener('click', async function(){
+        var id = btn.getAttribute('data-id');
+        checklistItems = checklistItems.filter(function(x){ return x.id !== id; });
+        delete step3Checks[id];
+        await saveChecklistItems(); renderChecklistManageScreen();
+      });
+    });
+    async function addCk(){
+      var inp = document.getElementById('ckNewText'), v = inp.value.trim();
+      if(!v) return;
+      checklistItems.push({ id:'ci'+Date.now(), text:v, urgent:false });
+      await saveChecklistItems(); renderChecklistManageScreen();
+    }
+    document.getElementById('ckAddBtn').addEventListener('click', addCk);
+    document.getElementById('ckNewText').addEventListener('keydown', function(ev){ if(ev.key === 'Enter'){ ev.preventDefault(); addCk(); } });
+    document.getElementById('ckResetBtn').addEventListener('click', async function(){
+      if(!window.confirm('매도 점검 항목을 기본 항목으로 되돌릴까요? 직접 추가·수정한 항목은 사라져요.')) return;
+      checklistItems = makeDefaultChecklistItems(); step3Checks = {};
+      await saveChecklistItems(); renderChecklistManageScreen();
+    });
+
+    body.querySelectorAll('.hqTextInput').forEach(function(inp){
+      inp.addEventListener('change', async function(){
+        var q = byId(HOLD_CONVICTION_QUESTIONS, inp.getAttribute('data-id'));
+        if(!q) return;
+        var v = inp.value.trim();
+        if(!v){ inp.value = q.text; return; }
+        q.text = v; await saveHoldQuestions(); flash('저장했어요');
+      });
+    });
+    body.querySelectorAll('.hqDelBtn').forEach(function(btn){
+      btn.addEventListener('click', async function(){
+        var id = btn.getAttribute('data-id');
+        HOLD_CONVICTION_QUESTIONS = HOLD_CONVICTION_QUESTIONS.filter(function(x){ return x.id !== id; });
+        await saveHoldQuestions(); renderChecklistManageScreen();
+      });
+    });
+    async function addHq(){
+      var inp = document.getElementById('hqNewText'), v = inp.value.trim();
+      if(!v) return;
+      HOLD_CONVICTION_QUESTIONS.push({ id:'hq'+Date.now(), text:v });
+      await saveHoldQuestions(); renderChecklistManageScreen();
+    }
+    document.getElementById('hqAddBtn').addEventListener('click', addHq);
+    document.getElementById('hqNewText').addEventListener('keydown', function(ev){ if(ev.key === 'Enter'){ ev.preventDefault(); addHq(); } });
+    document.getElementById('hqResetBtn').addEventListener('click', async function(){
+      if(!window.confirm('보유 확신 질문을 기본 질문으로 되돌릴까요?')) return;
+      HOLD_CONVICTION_QUESTIONS = makeDefaultHoldQuestions();
+      await saveHoldQuestions(); renderChecklistManageScreen();
+    });
+  }
+
   function renderMoodManageScreen(){
     var body = document.getElementById('moodManageBody');
     var html = '';
