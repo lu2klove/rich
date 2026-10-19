@@ -1891,7 +1891,7 @@
     .stampgrid .cell .cl.watch{ background:var(--olive-soft); color:var(--olive); }
     .stampgrid .cell .cl.more{ background:none; color:var(--ink-faint); padding-left:2px; }
     .stampgrid .check-badge{ display:none; }
-    .stampgrid .econ-badge{ left:auto; right:4px; bottom:3px; }
+    .stampgrid .econ-badge{ left:auto; right:5px; bottom:4px; display:flex; gap:3px; letter-spacing:0; }
     .stampgrid .dow{ font-size:11px; padding-bottom:2px; }
   }
 </style>
@@ -8493,6 +8493,8 @@ window.addEventListener('error', function(ev){
   }
 
   var typeLabel = { buy:'매수', sell:'매도', watch:'관망' };
+  var typeEmoji = { buy:'🟢', sell:'🔴', watch:'👀' };
+  function typeText(t){ return (isDesk() && typeEmoji[t] ? typeEmoji[t] + ' ' : '') + typeLabel[t]; }
   var marketLabel = { up:'상승장', down:'하락장', sideways:'횡보장', volatile:'변동성' };
   var PERIOD_LABEL_MAP = { all:'전체', thisweek:'이번 주', lastweek:'지난 주', thismonth:'이번 달', quarter:'분기' };
   var EMOTIONAL_MOODS = ['😰','😤','🐑','🔥'];
@@ -8903,7 +8905,7 @@ window.addEventListener('error', function(ev){
         var dayList = entriesForDate(ds), maxL = dayList.length > 3 ? 2 : 3;
         dayList.slice(0, maxL).forEach(function(en){
           var ln = document.createElement('span'); ln.className = 'cl ' + en.type;
-          ln.textContent = typeLabel[en.type] + (en.ticker ? ' ' + en.ticker : '');
+          ln.textContent = typeText(en.type) + (en.ticker ? ' ' + en.ticker : '');
           cell.appendChild(ln);
         });
         if(dayList.length > maxL){
@@ -8925,7 +8927,8 @@ window.addEventListener('error', function(ev){
         var hasUs = dayEconEvents.some(function(ev){ return ev.country === 'US'; });
         var econBadge = document.createElement('span');
         econBadge.className = 'econ-badge';
-        econBadge.innerHTML = (hasKr?flagSvgIcon('KR',10):'') + (hasUs?flagSvgIcon('US',10):'');
+        var fs = isDesk() ? 20 : 10;
+        econBadge.innerHTML = (hasKr?flagSvgIcon('KR',fs):'') + (hasUs?flagSvgIcon('US',fs):'');
         econBadge.title = dayEconEvents.length + '건의 주요 지표 발표';
         cell.appendChild(econBadge);
       }
@@ -9339,7 +9342,7 @@ window.addEventListener('error', function(ev){
       html += '<div class="daygroup"><p class="dayheader">'+niceDate(e.date)+'</p>';
       html += '<div class="entry'+(isExpanded?' expanded':'')+'" data-id="'+e.id+'">';
       html += '<div class="entry-top">';
-      html += '<span class="badge '+e.type+'">'+typeLabel[e.type]+'</span>';
+      html += '<span class="badge '+e.type+'">'+typeText(e.type)+'</span>';
       if(e.ticker){ html += '<span class="ticker">'+escapeHtml(e.ticker)+'</span>'; }
       if(e.mood){ html += '<span class="mood">'+e.mood+'</span>'; }
       html += '</div>';
@@ -9696,7 +9699,7 @@ window.addEventListener('error', function(ev){
         var isConfirming = confirmDeleteId === entry.id;
         html += '<div class="day-entry-item">';
         html += '<div class="entry-top">';
-        html += '<span class="badge '+entry.type+'">'+typeLabel[entry.type]+'</span>';
+        html += '<span class="badge '+entry.type+'">'+typeText(entry.type)+'</span>';
         if(entry.ticker){ html += '<span class="ticker">'+escapeHtml(entry.ticker)+'</span>'; }
         if(entry.mood){ html += '<span class="mood">'+entry.mood+'</span>'; }
         html += '</div>';
@@ -9795,7 +9798,7 @@ window.addEventListener('error', function(ev){
         var isConfirming = confirmDeleteId === entry.id;
         html += '<div class="day-entry-item">';
         html += '<div class="entry-top">';
-        html += '<span class="badge '+entry.type+'">'+typeLabel[entry.type]+'</span>';
+        html += '<span class="badge '+entry.type+'">'+typeText(entry.type)+'</span>';
         if(entry.ticker){ html += '<span class="ticker">'+escapeHtml(entry.ticker)+'</span>'; }
         if(entry.mood){ html += '<span class="mood">'+entry.mood+'</span>'; }
         html += '<span style="font-size:11.5px;color:var(--ink-faint);margin-left:auto;">'+niceDate(entry.date)+'</span>';
