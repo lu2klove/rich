@@ -3966,7 +3966,7 @@ window.addEventListener('error', function(ev){
       var ps = tile.querySelectorAll('p');
       ps.forEach(function(p){ p.style.visibility = ''; });
       for(var i = ps.length - 1; i >= 0; i--){
-        if(tile.scrollHeight <= tile.clientHeight + 1 || i === 0){
+        if((tile.scrollHeight <= tile.clientHeight + 1 && ps[i].scrollWidth <= ps[i].clientWidth + 1) || i === 0){
           if(i === 0 && (tile.scrollHeight > tile.clientHeight + 1)){ ps[0].style.visibility = 'hidden'; }
           break;
         }
@@ -4023,17 +4023,10 @@ window.addEventListener('error', function(ev){
     laid.forEach(function(t){
       var leftPct = (t.x/VW*100), topPct = (t.y/VH*100), wPct = (t.w/VW*100), hPct = (t.h/VH*100);
       var bg = heatmapColor(t.dayPct);
-      var tiny = (t.w < 46 || t.h < 34);
       html += '<div class="hm-tile" title="'+escapeHtml(t.ticker)+(t.dayPct!=null?' '+(t.dayPct>=0?'+':'')+t.dayPct.toFixed(1)+'%':'')+'" style="position:absolute;left:'+leftPct+'%;top:'+topPct+'%;width:'+wPct+'%;height:'+hPct+'%;background:'+bg+';border:1px solid rgba(0,0,0,0.25);box-sizing:border-box;padding:5px 6px;overflow:hidden;color:#fff;">';
-      if(!tiny){
-        html += '<p style="font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0;">'+escapeHtml(t.ticker)+'</p>';
-        html += '<p style="font-size:12px;font-weight:800;margin:2px 0 0;">'+(t.dayPct!=null?((t.dayPct>=0?'+':'')+t.dayPct.toFixed(1)+'%'):'-')+'</p>';
-        if(t.h > 55){
-          html += '<p style="font-size:10.5px;opacity:0.85;margin:2px 0 0;">'+formatWon(t.marketValue)+'원</p>';
-        }
-      }else{
-        html += '<p style="font-size:10px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0;">'+escapeHtml(t.ticker)+'</p>';
-      }
+      html += '<p style="font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0;">'+escapeHtml(t.ticker)+'</p>';
+      html += '<p style="font-size:12px;font-weight:800;margin:2px 0 0;white-space:nowrap;">'+(t.dayPct!=null?((t.dayPct>=0?'+':'')+t.dayPct.toFixed(1)+'%'):'-')+'</p>';
+      html += '<p style="font-size:10.5px;opacity:0.85;margin:2px 0 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+formatWon(t.marketValue)+'원</p>';
       html += '</div>';
     });
     html += '</div></div>';
