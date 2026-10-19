@@ -223,6 +223,11 @@
     cursor:pointer;
     padding:7px 12px;
   }
+  .back-circle{
+    width:38px; height:38px; padding:0; border-radius:50%; flex-shrink:0;
+    display:inline-flex; align-items:center; justify-content:center; font-size:16px; line-height:1;
+  }
+  .back-circle:active{ background:var(--pine-soft); }
   .select-pill{
     background:var(--paper-raised);
     border:1px solid var(--line);
@@ -1338,6 +1343,18 @@
     100%{transform:scale(1) rotate(0);}
   }
   .cell[data-date]{ cursor:pointer; }
+  .stampgrid .cell.holiday, .stampgrid .cell.holiday:nth-child(7n+14){ color:var(--brick); }
+  .stampgrid .cell.holiday.today{ color:var(--brick) !important; }
+  .cell .hol-name{
+    position:absolute; left:1px; right:1px; bottom:2px; text-align:center;
+    font-family:'IBM Plex Sans KR',sans-serif; font-size:7.5px; font-weight:500; line-height:1;
+    color:var(--brick); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; pointer-events:none;
+  }
+  .hol-tag{
+    display:inline-block; margin-left:6px; padding:1px 7px; border-radius:10px;
+    background:var(--brick-soft); color:var(--brick);
+    font-family:'IBM Plex Sans KR',sans-serif; font-size:11px; font-weight:600; vertical-align:middle;
+  }
   .cell.selected-day{
     outline:2px solid var(--ink);
     outline-offset:1px;
@@ -1854,6 +1871,7 @@
       display:block; font-family:'IBM Plex Sans KR',sans-serif; font-size:11.5px; font-weight:500; line-height:1.3;
       padding:1px 5px; border-radius:4px; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
     }
+    .stampgrid .cell .hol-name{ position:static; text-align:left; font-size:11px; font-weight:600; padding:0 2px; margin-top:1px; }
     .stampgrid .cell .cl.buy{ background:var(--pine-soft); color:var(--pine); }
     .stampgrid .cell .cl.sell{ background:var(--brick-soft); color:var(--brick); }
     .stampgrid .cell .cl.watch{ background:var(--olive-soft); color:var(--olive); }
@@ -2079,7 +2097,7 @@
 
 <div class="asset-screen" id="assetScreen">
   <div class="asset-header">
-    <button class="asset-back" id="assetBackBtn" type="button">‹ 뒤로</button>
+    <button class="asset-back back-circle" id="assetBackBtn" type="button" aria-label="뒤로"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
     <span class="asset-title">📊 자산관리</span>
     <button class="cancelbtn" id="assetSettingsBtn" type="button" style="width:44px;height:36px;padding:0;font-size:16px;">⚙️</button>
   </div>
@@ -2088,7 +2106,7 @@
 
 <div class="asset-screen" id="dividendScreen">
   <div class="asset-header">
-    <button class="asset-back" id="dividendBackBtn" type="button">‹ 뒤로</button>
+    <button class="asset-back back-circle" id="dividendBackBtn" type="button" aria-label="뒤로"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
     <span class="asset-title">💰 배당관리</span>
     <span style="width:44px;"></span>
   </div>
@@ -2167,9 +2185,9 @@
 
 <div class="asset-screen" id="investJudgmentScreen">
   <div class="asset-header">
-    <button class="asset-back" id="investJudgmentBackBtn" type="button">‹ 뒤로</button>
+    <button class="asset-back back-circle" id="investJudgmentBackBtn" type="button" aria-label="뒤로"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
     <span class="asset-title">🧭 투자판단</span>
-    <button class="asset-back" id="manageChecklistBtn" type="button" aria-label="점검항목 관리">✏️</button>
+    <button class="asset-back back-circle" id="manageChecklistBtn" type="button" aria-label="점검항목 관리">✏️</button>
   </div>
   <div class="asset-body">
     <div class="chiprow" id="judgmentTabChips" style="margin-bottom:16px;">
@@ -2187,7 +2205,7 @@
 
 <div class="asset-screen" id="checklistManageScreen">
   <div class="asset-header">
-    <button class="asset-back" id="checklistManageBackBtn" type="button">‹ 뒤로</button>
+    <button class="asset-back back-circle" id="checklistManageBackBtn" type="button" aria-label="뒤로"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
     <span class="asset-title">✏️ 점검항목 관리</span>
     <span style="width:44px;"></span>
   </div>
@@ -2196,7 +2214,7 @@
 
 <div class="asset-screen" id="accountManageScreen">
   <div class="asset-header">
-    <button class="asset-back" id="accountManageBackBtn" type="button">‹ 뒤로</button>
+    <button class="asset-back back-circle" id="accountManageBackBtn" type="button" aria-label="뒤로"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
     <span class="asset-title">🏦 계좌 관리</span>
     <span style="width:44px;"></span>
   </div>
@@ -2205,7 +2223,7 @@
 
 <div class="asset-screen" id="sellPrincipleScreen">
   <div class="asset-header">
-    <button class="asset-back" id="sellPrincipleBackBtn" type="button">‹ 뒤로</button>
+    <button class="asset-back back-circle" id="sellPrincipleBackBtn" type="button" aria-label="뒤로"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
     <span class="asset-title">🎯 매도 원칙 설정</span>
     <span style="width:44px;"></span>
   </div>
@@ -2214,7 +2232,7 @@
 
 <div class="asset-screen" id="moodManageScreen">
   <div class="asset-header">
-    <button class="asset-back" id="moodManageBackBtn" type="button">‹ 뒤로</button>
+    <button class="asset-back back-circle" id="moodManageBackBtn" type="button" aria-label="뒤로"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
     <span class="asset-title">🙂 감정 관리</span>
     <span style="width:44px;"></span>
   </div>
@@ -2223,7 +2241,7 @@
 
 <div class="asset-screen" id="profitRankingScreen">
   <div class="asset-header">
-    <button class="asset-back" id="profitRankingBackBtn" type="button">‹ 뒤로</button>
+    <button class="asset-back back-circle" id="profitRankingBackBtn" type="button" aria-label="뒤로"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
     <span class="asset-title">🏆 손익 랭킹</span>
     <span style="width:44px;"></span>
   </div>
@@ -2232,7 +2250,7 @@
 
 <div class="asset-screen" id="reviewScreen">
   <div class="asset-header">
-    <button class="asset-back" id="reviewBackBtn" type="button">‹ 뒤로</button>
+    <button class="asset-back back-circle" id="reviewBackBtn" type="button" aria-label="뒤로"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
     <span class="asset-title">🔍 복기</span>
     <span style="width:44px;"></span>
   </div>
@@ -8653,6 +8671,23 @@ window.addEventListener('error', function(ev){
     }
   }
 
+  // ---------- 법정공휴일 (2024~2028 · 대체공휴일 포함) ----------
+  // 임시공휴일이 새로 공표되면 아래 표에 'YYYY-MM-DD': '이름' 한 줄만 추가하면 돼요.
+  var HOLIDAYS = {
+    '2024-01-01':'신정','2024-02-09':'설날연휴','2024-02-10':'설날','2024-02-11':'설날연휴','2024-02-12':'대체공휴일','2024-03-01':'삼일절','2024-04-10':'국회의원선거','2024-05-05':'어린이날','2024-05-06':'대체공휴일','2024-05-15':'석가탄신일','2024-06-06':'현충일','2024-08-15':'광복절','2024-09-16':'추석연휴','2024-09-17':'추석','2024-09-18':'추석연휴','2024-10-01':'국군의날','2024-10-03':'개천절','2024-10-09':'한글날','2024-12-25':'성탄절',
+    '2025-01-01':'신정','2025-01-27':'임시공휴일','2025-01-28':'설날연휴','2025-01-29':'설날','2025-01-30':'설날연휴','2025-03-01':'삼일절','2025-03-03':'대체공휴일','2025-05-05':'어린이날','2025-05-06':'대체공휴일','2025-06-03':'대통령선거','2025-06-06':'현충일','2025-08-15':'광복절','2025-10-03':'개천절','2025-10-05':'추석연휴','2025-10-06':'추석','2025-10-07':'추석연휴','2025-10-08':'대체공휴일','2025-10-09':'한글날','2025-12-25':'성탄절',
+    '2026-01-01':'신정','2026-02-16':'설날연휴','2026-02-17':'설날','2026-02-18':'설날연휴','2026-03-01':'삼일절','2026-03-02':'대체공휴일','2026-05-05':'어린이날','2026-05-24':'석가탄신일','2026-05-25':'대체공휴일','2026-06-03':'지방선거','2026-06-06':'현충일','2026-08-15':'광복절','2026-08-17':'대체공휴일','2026-09-24':'추석연휴','2026-09-25':'추석','2026-09-26':'추석연휴','2026-09-28':'대체공휴일','2026-10-03':'개천절','2026-10-05':'대체공휴일','2026-10-09':'한글날','2026-12-25':'성탄절',
+    '2027-01-01':'신정','2027-02-06':'설날연휴','2027-02-07':'설날','2027-02-08':'설날연휴','2027-02-09':'대체공휴일','2027-03-01':'삼일절','2027-03-03':'대통령선거','2027-05-05':'어린이날','2027-05-13':'석가탄신일','2027-06-06':'현충일','2027-08-15':'광복절','2027-08-16':'대체공휴일','2027-09-14':'추석연휴','2027-09-15':'추석','2027-09-16':'추석연휴','2027-10-03':'개천절','2027-10-04':'대체공휴일','2027-10-09':'한글날','2027-10-11':'대체공휴일','2027-12-25':'성탄절','2027-12-27':'대체공휴일',
+    '2028-01-01':'신정','2028-01-26':'설날연휴','2028-01-27':'설날','2028-01-28':'설날연휴','2028-03-01':'삼일절','2028-04-12':'국회의원선거','2028-05-02':'석가탄신일','2028-05-05':'어린이날','2028-06-06':'현충일','2028-08-15':'광복절','2028-10-02':'추석연휴','2028-10-03':'추석(개천절)','2028-10-04':'추석연휴','2028-10-05':'대체공휴일','2028-10-09':'한글날','2028-12-25':'성탄절'
+  };
+  function holidayName(ds){
+    if(HOLIDAYS[ds]) return HOLIDAYS[ds];
+    var y = +ds.slice(0,4);
+    if(y >= 2024 && y <= 2028) return '';          // 표에 있는 해는 표만 믿어요
+    var fixed = { '01-01':'신정', '03-01':'삼일절', '05-05':'어린이날', '06-06':'현충일', '08-15':'광복절', '10-03':'개천절', '10-09':'한글날', '12-25':'성탄절' };
+    return fixed[ds.slice(5)] || '';               // 그 밖의 해는 양력 공휴일만(음력 공휴일은 표 확장 필요)
+  }
+
   function renderStampGrid(justStampedToday){
     var now = new Date();
     var displayDate = new Date(now.getFullYear(), now.getMonth() + calendarOffset, 1);
@@ -8693,8 +8728,11 @@ window.addEventListener('error', function(ev){
       if(selectedCalendarDate === ds) cls += ' selected-day';
       cell.className = cls;
       cell.setAttribute('data-date', ds);
+      var holName = holidayName(ds);
+      if(holName){ cell.classList.add('holiday'); cell.title = holName; }
       if(isDesk()){
         var dn = document.createElement('span'); dn.className = 'dnum'; dn.textContent = day; cell.appendChild(dn);
+        if(holName){ var hl = document.createElement('span'); hl.className = 'hol-name'; hl.textContent = holName; cell.appendChild(hl); }
         var dayList = entriesForDate(ds), maxL = dayList.length > 3 ? 2 : 3;
         dayList.slice(0, maxL).forEach(function(en){
           var ln = document.createElement('span'); ln.className = 'cl ' + en.type;
@@ -8706,6 +8744,7 @@ window.addEventListener('error', function(ev){
         }
       }else{
         cell.textContent = day;
+        if(holName){ var hm = document.createElement('span'); hm.className = 'hol-name'; hm.textContent = holName.replace('공휴일','휴일'); cell.appendChild(hm); }
       }
       if(isFilled && !isDesk()){
         var badge = document.createElement('span');
@@ -9463,7 +9502,7 @@ window.addEventListener('error', function(ev){
     var dayEntries = entriesForDate(ds);
     var html = '<div class="day-detail-inner">';
     html += '<div class="day-detail-head">';
-    html += '<span class="day-detail-date">'+niceDate(ds)+'</span>';
+    html += '<span class="day-detail-date">'+niceDate(ds)+(holidayName(ds)?' <span class="hol-tag">'+escapeHtml(holidayName(ds))+'</span>':'')+'</span>';
     html += '<button class="recordbtn" id="dayRecordBtn" type="button">기록하기</button>';
     html += '</div>';
 
