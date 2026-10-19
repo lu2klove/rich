@@ -1816,21 +1816,37 @@
   .app-side{ display:none; }
   @media (min-width:1100px) and (orientation:landscape){
     .app{ max-width:1760px; padding:calc(24px + env(safe-area-inset-top)) 32px 40px;
-          display:grid; grid-template-columns:minmax(0,1fr) 440px; column-gap:28px; align-items:start; }
+          display:grid; grid-template-columns:minmax(0,1fr) 440px; column-gap:28px; align-items:stretch; align-content:start; }
     .app-main{ min-width:0; }
-    .app-side{ display:block; position:sticky; top:12px; max-height:calc(100vh - 56px); overflow-y:auto;
-               scrollbar-width:thin; padding:0 2px 80px 2px; }
-    .app-side .day-detail{ max-height:none !important; overflow:visible; transition:none; }
-    .app-side .day-detail-inner{ padding-top:0; border-top:none; }
-    .app-side #entryFormWrap{ display:none; max-height:none !important; overflow:visible; transition:none; }
-    body.desk-form-open .app-side #entryFormWrap{ display:block; }
-    body.desk-form-open .app-side #dayDetail, body.desk-form-open .app-side #monthEntriesDetail{ display:none; }
-    .app-side .overlay-close-btn{ display:flex !important; align-items:center; justify-content:center; }
-    .app-side #dayDetail{ background:var(--paper-raised); border:1px solid var(--line); border-radius:var(--radius); padding:14px 16px; margin-bottom:12px; }
-    .app-side #monthEntriesDetail:empty{ display:none; }
+    .fab-settings{ display:none; }
+    #appMain > .card{ margin-bottom:0; }
+    #errBox:empty{ display:none; }
+    /* 우측 패널: 인스타그램 프로필 카드처럼 얇은 테두리 한 장, 아래쪽은 달력 카드 하단에 맞춤 */
+    .app-side{ display:block; position:relative; min-width:0; min-height:560px; }
+    .side-card{ position:absolute; inset:0; display:flex; flex-direction:column; overflow:hidden;
+                background:var(--paper-raised); border:1px solid var(--line); border-radius:12px; }
+    .side-stats{ flex:0 0 auto; padding:16px 10px 4px; border-bottom:1px solid var(--line); }
+    .side-stats .stats{ border-bottom:none; margin-bottom:0; padding-bottom:12px; }
+    .side-body{ flex:1 1 auto; min-height:0; overflow-y:auto; padding:16px 18px; scrollbar-width:thin; }
+    .side-foot{ flex:0 0 auto; border-top:1px solid var(--line); padding:10px 14px; display:flex; align-items:center; }
+    .side-settings{
+      display:inline-flex; align-items:center; gap:8px; padding:6px 12px 6px 6px; border-radius:20px;
+      border:1px solid var(--line); background:var(--paper); color:var(--ink-soft);
+      font-family:'IBM Plex Sans KR',sans-serif; font-size:13px; font-weight:600; cursor:pointer;
+    }
+    .side-settings-ico{ width:28px; height:28px; border-radius:50%; background:var(--ink); display:flex; align-items:center; justify-content:center; font-size:14px; }
+    .side-settings:hover{ background:var(--pine-soft); }
+    .side-body .day-detail{ max-height:none !important; overflow:visible; transition:none; }
+    .side-body .day-detail-inner{ padding-top:0; margin-top:0; border-top:none; }
+    .side-body #entryFormWrap{ display:none; max-height:none !important; overflow:visible; transition:none; }
+    body.desk-form-open .side-body #entryFormWrap{ display:block; }
+    body.desk-form-open .side-body #dayDetail, body.desk-form-open .side-body #monthEntriesDetail{ display:none; }
+    .side-body .overlay-close-btn{ display:flex !important; align-items:center; justify-content:center; }
+    .side-body .card{ border:none; background:none; padding:0; margin:0; }
+    .side-body #monthEntriesDetail:empty{ display:none; }
     .stampgrid{ gap:6px; }
     .stampgrid .cell{
-      aspect-ratio:auto; min-height:clamp(78px, calc((100vh - 430px) / 6), 150px);
+      aspect-ratio:auto; min-height:clamp(78px, calc((100vh - 400px) / 6), 150px);
       flex-direction:column; align-items:stretch; justify-content:flex-start;
       padding:5px 6px; font-size:12px; overflow:hidden; text-align:left;
     }
@@ -2045,7 +2061,13 @@
 
   <p class="toast" id="errBox" style="color:var(--brick);"></p>
 </div>
-<aside class="app-side" id="appSide" aria-label="선택한 날짜 기록"></aside>
+<aside class="app-side" id="appSide" aria-label="선택한 날짜 기록">
+  <div class="side-card">
+    <div class="side-stats" id="sideStats"></div>
+    <div class="side-body" id="sideBody"></div>
+    <div class="side-foot"><button class="side-settings" id="sideSettingsBtn" type="button" aria-label="설정"><span class="side-settings-ico">⚙️</span><span>설정</span></button></div>
+  </div>
+</aside>
 </div>
 
 <div class="menu-backdrop" id="menuBackdrop"></div>
@@ -8615,9 +8637,11 @@ window.addEventListener('error', function(ev){
     var desk = isDesk();
     if(deskLaid === desk) return;
     deskLaid = desk;
-    var side = document.getElementById('appSide'), main = document.getElementById('appMain');
+    var side = document.getElementById('sideBody'), main = document.getElementById('appMain');
     var day = document.getElementById('dayDetail'), mon = document.getElementById('monthEntriesDetail'), wrap = document.getElementById('entryFormWrap');
+    var stats = document.querySelector('#appMain .stats') || document.querySelector('#sideStats .stats');
     if(desk){
+      document.getElementById('sideStats').appendChild(stats);
       side.appendChild(day); side.appendChild(mon); side.appendChild(wrap);
       wrap.classList.remove('overlay-mode');
       document.body.classList.remove('entryform-overlay-active');
@@ -8625,6 +8649,7 @@ window.addEventListener('error', function(ev){
       if(!selectedCalendarDate) selectedCalendarDate = todayStr();
     }else{
       var card = document.getElementById('stampgrid').parentNode;
+      card.insertBefore(stats, card.firstChild);
       card.appendChild(day); card.appendChild(mon);
       main.insertBefore(wrap, document.getElementById('errBox'));
       document.body.classList.remove('desk-form-open');
@@ -9356,7 +9381,7 @@ window.addEventListener('error', function(ev){
     var wrap = document.getElementById('entryFormWrap');
     if(isDesk()){
       document.body.classList.add('desk-form-open');
-      var sd = document.getElementById('appSide'); if(sd) sd.scrollTop = 0;
+      var sd = document.getElementById('sideBody'); if(sd) sd.scrollTop = 0;
     }else if(asOverlay){
       wrap.classList.add('overlay-mode');
       document.body.classList.add('entryform-overlay-active');
@@ -10091,6 +10116,7 @@ window.addEventListener('error', function(ev){
       document.getElementById('settingsSheet').classList.remove('open');
     }
     document.getElementById('fabSettingsBtn').addEventListener('click', openSettingsSheet);
+    document.getElementById('sideSettingsBtn').addEventListener('click', openSettingsSheet);
     document.getElementById('notifBackup').addEventListener('change', async function(){
       notifSettings.backup = this.checked;
       await saveNotifSettings();
