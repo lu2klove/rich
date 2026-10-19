@@ -2200,9 +2200,9 @@
 
 <div class="asset-screen" id="investJudgmentScreen">
   <div class="asset-header">
-    <button class="asset-back back-circle" id="investJudgmentBackBtn" type="button" aria-label="뒤로"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <span class="asset-hdr-side"><button class="asset-back back-circle" id="investJudgmentBackBtn" type="button" aria-label="뒤로"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button></span>
     <span class="asset-title">🧭 투자판단</span>
-    <button class="asset-back back-circle" id="manageChecklistBtn" type="button" aria-label="점검항목 관리">✏️</button>
+    <span class="asset-hdr-side right"><button class="asset-back back-circle" id="judgmentRefreshBtn" type="button" aria-label="시세 새로고침" title="시세 새로고침" style="display:none;">🔄</button><button class="asset-back back-circle" id="manageChecklistBtn" type="button" aria-label="점검항목 관리" title="점검항목 관리" style="display:none;">✏️</button></span>
   </div>
   <div class="asset-body">
     <div class="chiprow" id="judgmentTabChips" style="margin-bottom:16px;">
@@ -3452,6 +3452,43 @@ window.addEventListener('error', function(ev){
   var stockRiskHistoryCache = {}; // { [ticker]: {stockHistory, marketHistory, fetchedAt} }
   var stockRiskLoading = false;
   var stockRiskError = null;
+  async function refreshSellTabQuotes(){
+    await fetchMajorQuoteData();
+    await fetchMarketStatusData();
+    var vkospiResult = await fetchVkospiData();
+    var priceResult = await performHoldingsPriceRefresh();
+    var msgParts = [];
+    if(priceResult.total > 0){
+      msgParts.push('보유종목 '+priceResult.successCount+'개 갱신'+(priceResult.failCount>0?' · '+priceResult.failCount+'개 실패':''));
+    }
+    if(!vkospiResult.ok){
+      msgParts.push('VKOSPI 조회 실패: ' + vkospiResult.error);
+    }
+    marketStatusHoldingsRefreshMsg = msgParts.join(' · ');
+    renderSellChecklistScreen();
+  }
+  var judgmentRefreshing = false;
+  async function refreshJudgmentTab(){
+    if(judgmentRefreshing) return;
+    judgmentRefreshing = true;
+    var btn = document.getElementById('judgmentRefreshBtn');
+    btn.disabled = true; btn.style.opacity = '0.5';
+    try{
+      if(judgmentActiveTab === 'marketrisk'){
+        await fetchMarketStatusData();
+        await fetchVkospiData();
+        renderMarketRiskScreen();
+      }else if(judgmentActiveTab === 'stockrisk'){
+        if(stockRiskTicker) await fetchStockRiskData(stockRiskTicker);
+      }else if(judgmentActiveTab === 'sell'){
+        await refreshSellTabQuotes();
+      }
+    }catch(err){
+      console.error(err);
+    }finally{
+      judgmentRefreshing = false; btn.disabled = false; btn.style.opacity = '';
+    }
+  }
   function switchJudgmentTab(tab){
     judgmentActiveTab = tab;
     document.querySelectorAll('#judgmentTabChips .chip').forEach(function(c){
@@ -3461,7 +3498,8 @@ window.addEventListener('error', function(ev){
     document.getElementById('marketRiskBody').style.display = (tab === 'marketrisk') ? 'block' : 'none';
     document.getElementById('stockRiskBody').style.display = (tab === 'stockrisk') ? 'block' : 'none';
     document.getElementById('sellChecklistBody').style.display = (tab === 'sell') ? 'block' : 'none';
-    document.getElementById('manageChecklistBtn').style.visibility = (tab === 'sell') ? 'visible' : 'hidden';
+    document.getElementById('manageChecklistBtn').style.display = (tab === 'sell') ? '' : 'none';
+    document.getElementById('judgmentRefreshBtn').style.display = (tab === 'cycle') ? 'none' : '';
     if(tab === 'cycle'){
       renderCycleDetectScreen();
     }else if(tab === 'marketrisk'){
@@ -6368,7 +6406,6 @@ window.addEventListener('error', function(ev){
     html += '<p style="font-size:13.5px;color:var(--ink-soft);white-space:pre-line;">'+escapeHtml(verdict.desc)+'</p>';
     html += '</div>';
 
-    html += '<button class="cancelbtn" id="stockRiskRefreshBtn" type="button" style="width:100%;margin-top:16px;">🔄 최신 시세로 다시 진단</button>';
 
     body.innerHTML = html;
     wireStockRiskEvents();
@@ -6484,26 +6521,10 @@ window.addEventListener('error', function(ev){
 
       waitHtml +=
         '<p class="empty-inline">' +
-        '아직 판단할 데이터가 부족해요. 시세를 불러오면 자동으로 다시 계산할게요.' +
+        '아직 판단할 데이터가 부족해요. 우측 상단 🔄을 눌러 시세를 불러오면 자동으로 다시 계산할게요.' +
         '</p>';
 
-      waitHtml +=
-        '<button class="cancelbtn" id="mkrFetchBtn" type="button" style="width:100%;margin-top:12px;">' +
-        '🔄 시장 시세 새로고침' +
-        '</button>';
-
       body.innerHTML = waitHtml;
-
-      document
-        .getElementById('mkrFetchBtn')
-        .addEventListener(
-          'click',
-          async function(){
-            await fetchMarketStatusData();
-            await fetchVkospiData();
-            renderMarketRiskScreen();
-          }
-        );
 
       return;
     }
@@ -6773,7 +6794,6 @@ window.addEventListener('error', function(ev){
      * ⑤ 새로고침
      * ============================================================ */
 
-    html += '<button class="cancelbtn" id="mkrFetchBtn" type="button" style="width:100%;margin-top:16px;">🔄 시장 시세 새로고침</button>';
     html += '<p class="savehint">VKOSPI(변동성 지수)는 새로고침할 때 KRX 전일 종가 기준으로 자동으로 채워져요.</p>';
 
     body.innerHTML = html;
@@ -7046,7 +7066,6 @@ window.addEventListener('error', function(ev){
       html += '</tr>';
     });
     html += '</tbody></table>';
-    html += '<button class="cancelbtn" id="marketStatusFetchBtn" type="button" style="width:100%;margin-top:10px;">🔄 시장·종목 시세 새로고침</button>';
     if(marketStatusHoldingsRefreshMsg){
       html += '<p class="toast" style="color:var(--pine);margin-top:6px;">'+escapeHtml(marketStatusHoldingsRefreshMsg)+'</p>';
     }
@@ -7240,24 +7259,6 @@ window.addEventListener('error', function(ev){
         marketStatusMode = r.value;
         renderSellChecklistScreen();
       });
-    });
-    document.getElementById('marketStatusFetchBtn').addEventListener('click', async function(){
-      var btn = this;
-      btn.disabled = true;
-      btn.textContent = '조회 중…';
-      await fetchMajorQuoteData();
-      await fetchMarketStatusData();
-      var vkospiResult = await fetchVkospiData();
-      var priceResult = await performHoldingsPriceRefresh();
-      var msgParts = [];
-      if(priceResult.total > 0){
-        msgParts.push('보유종목 '+priceResult.successCount+'개 갱신'+(priceResult.failCount>0?' · '+priceResult.failCount+'개 실패':''));
-      }
-      if(!vkospiResult.ok){
-        msgParts.push('VKOSPI 조회 실패: ' + vkospiResult.error);
-      }
-      marketStatusHoldingsRefreshMsg = msgParts.join(' · ');
-      renderSellChecklistScreen();
     });
     document.querySelectorAll('.market-row-clickable').forEach(function(row){
       row.addEventListener('click', function(){
@@ -8973,6 +8974,20 @@ window.addEventListener('error', function(ev){
     return list.slice().sort(function(a,b){ return a.date < b.date ? 1 : -1; });
   }
 
+  function moodNameOf(icon){
+    var f = DEFAULT_MOODS.find(function(m){ return m.icon === icon; });
+    if(!f && typeof customMoods !== 'undefined') f = customMoods.find(function(m){ return m.icon === icon; });
+    if(f) return f.label;
+    var chips = document.querySelectorAll('[data-mood]');
+    for(var i = 0; i < chips.length; i++){
+      if(chips[i].getAttribute('data-mood') === icon){
+        var t = chips[i].textContent.replace(icon, '').trim();
+        if(t) return t;
+      }
+    }
+    return '';
+  }
+
   function computeReviewBreakdown(mode){
     var periodEntries = entriesInPeriod(periodMode);
     if(mode === 'mood'){
@@ -8985,7 +9000,7 @@ window.addEventListener('error', function(ev){
       var mtotal = Object.keys(mbuckets).reduce(function(s,k){ return s + mbuckets[k]; }, 0);
       var mlist = Object.keys(mbuckets).map(function(k, i){
         return {
-          key:k, label:k,
+          key:k, label:(moodNameOf(k) ? k+' '+moodNameOf(k) : k),
           color: ACCOUNT_PALETTE[i % ACCOUNT_PALETTE.length],
           amount: mbuckets[k],
           pct: mtotal > 0 ? (mbuckets[k]/mtotal*100) : 0
@@ -10436,6 +10451,7 @@ window.addEventListener('error', function(ev){
         switchJudgmentTab(c.getAttribute('data-tab'));
       });
     });
+    document.getElementById('judgmentRefreshBtn').addEventListener('click', refreshJudgmentTab);
     document.getElementById('manageChecklistBtn').addEventListener('click', function(){
       renderChecklistManageScreen();
       document.getElementById('checklistManageScreen').classList.add('open');
