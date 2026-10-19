@@ -3959,6 +3959,31 @@ window.addEventListener('error', function(ev){
     }
   }
 
+  // 히트맵 타일: 실제 화면 크기에서 글자가 잘리면 아래 줄부터 숨기고, 이름도 안 들어가면 전부 숨겨요.
+  var heatmapRO = null;
+  function fitHeatmapLabels(){
+    document.querySelectorAll('.hm-tile').forEach(function(tile){
+      var ps = tile.querySelectorAll('p');
+      ps.forEach(function(p){ p.style.visibility = ''; });
+      for(var i = ps.length - 1; i >= 0; i--){
+        if(tile.scrollHeight <= tile.clientHeight + 1 || i === 0){
+          if(i === 0 && (tile.scrollHeight > tile.clientHeight + 1)){ ps[0].style.visibility = 'hidden'; }
+          break;
+        }
+        ps[i].style.display = 'none';
+      }
+    });
+  }
+  function scheduleHeatmapFit(){
+    requestAnimationFrame(function(){
+      document.querySelectorAll('.hm-tile p').forEach(function(p){ p.style.display = ''; });
+      fitHeatmapLabels();
+      if(window.ResizeObserver){
+        if(!heatmapRO) heatmapRO = new ResizeObserver(function(){ scheduleHeatmapFit(); });
+        document.querySelectorAll('.hm-box').forEach(function(b){ heatmapRO.observe(b); });
+      }
+    });
+  }
   function renderHeatmapHTML(holdings){
     var hmHoldings = filterHoldingsByAccount(holdings, heatmapFilterAccount)
       .filter(function(h){ return h.marketValue > 0; });
@@ -3993,13 +4018,13 @@ window.addEventListener('error', function(ev){
     });
     var laid = computeTreemapLayout(items, 0, 0, VW, VH);
 
-    html += '<div style="position:relative;width:100%;padding-top:'+(VH/VW*100)+'%;border-radius:10px;overflow:hidden;background:#2b2f36;">';
+    html += '<div class="hm-box" style="position:relative;width:100%;padding-top:'+(VH/VW*100)+'%;border-radius:10px;overflow:hidden;background:#2b2f36;">';
     html += '<div style="position:absolute;inset:0;">';
     laid.forEach(function(t){
       var leftPct = (t.x/VW*100), topPct = (t.y/VH*100), wPct = (t.w/VW*100), hPct = (t.h/VH*100);
       var bg = heatmapColor(t.dayPct);
       var tiny = (t.w < 46 || t.h < 34);
-      html += '<div style="position:absolute;left:'+leftPct+'%;top:'+topPct+'%;width:'+wPct+'%;height:'+hPct+'%;background:'+bg+';border:1px solid rgba(0,0,0,0.25);box-sizing:border-box;padding:5px 6px;overflow:hidden;color:#fff;">';
+      html += '<div class="hm-tile" title="'+escapeHtml(t.ticker)+(t.dayPct!=null?' '+(t.dayPct>=0?'+':'')+t.dayPct.toFixed(1)+'%':'')+'" style="position:absolute;left:'+leftPct+'%;top:'+topPct+'%;width:'+wPct+'%;height:'+hPct+'%;background:'+bg+';border:1px solid rgba(0,0,0,0.25);box-sizing:border-box;padding:5px 6px;overflow:hidden;color:#fff;">';
       if(!tiny){
         html += '<p style="font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0;">'+escapeHtml(t.ticker)+'</p>';
         html += '<p style="font-size:12px;font-weight:800;margin:2px 0 0;">'+(t.dayPct!=null?((t.dayPct>=0?'+':'')+t.dayPct.toFixed(1)+'%'):'-')+'</p>';
@@ -8016,6 +8041,7 @@ window.addEventListener('error', function(ev){
     html += '<p class="asset-disclaimer">종목 현재가는 네이버증권 등과 실시간 연동되지 않아요(브라우저 보안 정책상 불가능). 직접 입력한 값으로만 손익을 계산해요.</p>';
 
     document.getElementById('assetBody').innerHTML = html;
+    scheduleHeatmapFit();
     [['foldOtherBtn','foldOtherBody','other'],['foldSetBtn','foldSetBody','set']].forEach(function(f){
       var b = document.getElementById(f[0]);
       if(!b) return;
@@ -8246,7 +8272,7 @@ window.addEventListener('error', function(ev){
     function handleHeatmapAccountChange(){
       heatmapFilterAccount = this.value;
       var section = document.getElementById('heatmapSection');
-      if(section) section.innerHTML = renderHeatmapHTML(computeHoldings());
+      if(section){ section.innerHTML = renderHeatmapHTML(computeHoldings()); scheduleHeatmapFit(); }
       var newSel = document.getElementById('heatmapAccountSelect');
       if(newSel) newSel.addEventListener('change', handleHeatmapAccountChange);
     }
