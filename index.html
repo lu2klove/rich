@@ -1837,6 +1837,11 @@
     background:var(--paper-raised); color:var(--ink); cursor:pointer;
   }
   .menu-item:active{ background:var(--pine-soft); }
+  .menu-drawer{ display:flex; flex-direction:column; }
+  .menu-foot{ margin-top:auto; padding-top:24px; }
+  .menu-logout{ width:100%; color:var(--brick); }
+  .fold-title{ display:flex; align-items:center; justify-content:space-between; width:100%; background:none; border:none; padding:0; cursor:pointer; text-align:left; font:inherit; color:inherit; }
+  .fold-arrow{ font-size:13px; color:var(--ink-soft); }
 
   /* ---- PC 가로 화면: 달력 + 우측 기록 패널 ---- */
   .app-side{ display:none; }
@@ -2102,6 +2107,7 @@
     <button class="menu-item" id="assetMgmtBtn" type="button">📊 자산관리</button>
     <button class="menu-item desk-only" id="menuSettingsBtn" type="button">⚙️ 설정</button>
   </div>
+  <div class="menu-foot"><button class="menu-item menu-logout" id="menuLogoutBtn" type="button">🚪 로그아웃</button></div>
 </aside>
 
 <div class="asset-screen" id="assetScreen">
@@ -4502,6 +4508,7 @@ window.addEventListener('error', function(ev){
     });
   }
 
+  var assetFold = { other:false, set:false };
   function renderMoodManageScreen(){
     var body = document.getElementById('moodManageBody');
     var html = '';
@@ -7965,7 +7972,8 @@ window.addEventListener('error', function(ev){
       }
     }
 
-    html += '<p class="card-title" style="margin-top:18px;">➕ 기타자산</p>';
+    html += '<p class="card-title" style="margin-top:18px;"><button class="fold-title" id="foldOtherBtn" type="button" aria-expanded="'+(assetFold.other?'true':'false')+'"><span>➕ 기타자산</span><span class="fold-arrow">'+(assetFold.other?'접기 ▴':'펼쳐보기 ▾')+'</span></button></p>';
+    html += '<div id="foldOtherBody" style="display:'+(assetFold.other?'block':'none')+';">';
     html += '<div class="other-asset-form">';
     html += '<input type="text" id="otherAssetName" placeholder="이름 (예: 퇴직연금)">';
     html += '<input type="text" inputmode="numeric" id="otherAssetAmount" placeholder="금액(원)">';
@@ -7987,7 +7995,9 @@ window.addEventListener('error', function(ev){
       html += '</div>';
     }
 
-    html += '<p class="card-title" style="margin-top:18px;">⚙️ 설정</p>';
+    html += '</div>';
+    html += '<p class="card-title" style="margin-top:18px;"><button class="fold-title" id="foldSetBtn" type="button" aria-expanded="'+(assetFold.set?'true':'false')+'"><span>⚙️ 설정</span><span class="fold-arrow">'+(assetFold.set?'접기 ▴':'펼쳐보기 ▾')+'</span></button></p>';
+    html += '<div id="foldSetBody" style="display:'+(assetFold.set?'block':'none')+';">';
     html += '<div class="ios-list">';
     html += '<button class="ios-row" id="accountRowBtn" type="button">';
     html += '<span class="ios-icon" style="background:var(--pine);">🏦</span>';
@@ -8001,10 +8011,21 @@ window.addEventListener('error', function(ev){
     html += '<span class="ios-chevron">›</span>';
     html += '</button>';
     html += '</div>';
+    html += '</div>';
 
     html += '<p class="asset-disclaimer">종목 현재가는 네이버증권 등과 실시간 연동되지 않아요(브라우저 보안 정책상 불가능). 직접 입력한 값으로만 손익을 계산해요.</p>';
 
     document.getElementById('assetBody').innerHTML = html;
+    [['foldOtherBtn','foldOtherBody','other'],['foldSetBtn','foldSetBody','set']].forEach(function(f){
+      var b = document.getElementById(f[0]);
+      if(!b) return;
+      b.addEventListener('click', function(){
+        assetFold[f[2]] = !assetFold[f[2]];
+        document.getElementById(f[1]).style.display = assetFold[f[2]] ? 'block' : 'none';
+        b.setAttribute('aria-expanded', assetFold[f[2]] ? 'true' : 'false');
+        b.querySelector('.fold-arrow').textContent = assetFold[f[2]] ? '접기 ▴' : '펼쳐보기 ▾';
+      });
+    });
 
     wirePortfolioSectionEvents();
     document.querySelectorAll('.accountSelect2').forEach(function(sel){
@@ -10205,6 +10226,7 @@ window.addEventListener('error', function(ev){
       document.getElementById('pwToast').textContent = '';
     });
     document.getElementById('logoutBtn').addEventListener('click', logout);
+    document.getElementById('menuLogoutBtn').addEventListener('click', function(){ if(window.confirm('로그아웃할까요?')) logout(); });
     document.getElementById('cancelPwBtn').addEventListener('click', function(){
       document.getElementById('changePwForm').style.display = 'none';
     });
